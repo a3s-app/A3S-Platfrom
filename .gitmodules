@@ -1,0 +1,6 @@
+[submodule "a3s-admin"]
+	path = a3s-admin
+	url = https://github.com/a3s-app/a3s-admin.git
+[submodule "a3s-client-portal"]
+	path = a3s-client-portal
+	url = https://github.com/a3s-app/a3s-client-portal.git
