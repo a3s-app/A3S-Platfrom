@@ -32,6 +32,16 @@
 13. [Troubleshooting](#-troubleshooting)
 14. [API Reference](#-api-reference)
 
+### 📚 Additional Documentation
+
+| Document | Description |
+|----------|-------------|
+| [DEVELOPMENT_SETUP.md](./DEVELOPMENT_SETUP.md) | **Developer quick start & environment setup** |
+| [ADMIN_CLIENT_SYNC_GUIDE.md](./ADMIN_CLIENT_SYNC_GUIDE.md) | **Admin ↔ Portal webhook sync, env variables** |
+| [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) | Complete database schema, all tables, enums, indexes |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Detailed platform architecture and data flows |
+| [scripts/000_full_database_setup.sql](./scripts/000_full_database_setup.sql) | Idempotent SQL script to setup entire database |
+
 ---
 
 ## 🎯 Overview
