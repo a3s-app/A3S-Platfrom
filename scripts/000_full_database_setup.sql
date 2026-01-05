@@ -977,12 +977,8 @@ CREATE TABLE IF NOT EXISTS accessibility_issues (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
-DO $$ BEGIN
-    ALTER TABLE accessibility_issues ADD CONSTRAINT unique_project_issue_id UNIQUE (project_id, issue_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
 -- Accessibility Issues indexes (MOST QUERIED TABLE - comprehensive indexing)
+-- Note: unique_project_issue_id is created as a UNIQUE INDEX below (handles both constraint and index cases)
 CREATE UNIQUE INDEX IF NOT EXISTS accessibility_issues_project_url_title_unique ON accessibility_issues(project_id, url_id, issue_title);
 CREATE INDEX IF NOT EXISTS idx_accessibility_issues_issue_id ON accessibility_issues(issue_id);
 CREATE INDEX IF NOT EXISTS accessibility_issues_project_url_idx ON accessibility_issues(project_id, url_id);
@@ -1062,10 +1058,17 @@ CREATE TABLE IF NOT EXISTS report_issues (
     included_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
+-- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
 DO $$ BEGIN
     ALTER TABLE report_issues ADD CONSTRAINT unique_report_issue UNIQUE (report_id, issue_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+EXCEPTION 
+    WHEN duplicate_object THEN NULL;
+    WHEN duplicate_table THEN NULL;
+    WHEN others THEN 
+        IF SQLSTATE = '42P07' THEN NULL; -- relation already exists
+        ELSE RAISE;
+        END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_report_issues_report_id ON report_issues(report_id);
 CREATE INDEX IF NOT EXISTS idx_report_issues_issue_id ON report_issues(issue_id);
@@ -1179,10 +1182,17 @@ CREATE TABLE IF NOT EXISTS client_users (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
+-- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
 DO $$ BEGIN
     ALTER TABLE client_users ADD CONSTRAINT unique_clerk_client UNIQUE (clerk_user_id, client_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+EXCEPTION 
+    WHEN duplicate_object THEN NULL;
+    WHEN duplicate_table THEN NULL;
+    WHEN others THEN 
+        IF SQLSTATE = '42P07' THEN NULL;
+        ELSE RAISE;
+        END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_client_users_clerk_user_id ON client_users(clerk_user_id);
 CREATE INDEX IF NOT EXISTS idx_client_users_client_id ON client_users(client_id);
@@ -1211,10 +1221,17 @@ CREATE TABLE IF NOT EXISTS client_team_members (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
+-- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
 DO $$ BEGIN
     ALTER TABLE client_team_members ADD CONSTRAINT unique_client_team_member_email UNIQUE (client_id, email);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+EXCEPTION 
+    WHEN duplicate_object THEN NULL;
+    WHEN duplicate_table THEN NULL;
+    WHEN others THEN 
+        IF SQLSTATE = '42P07' THEN NULL;
+        ELSE RAISE;
+        END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_client_team_members_client_id ON client_team_members(client_id);
 CREATE INDEX IF NOT EXISTS idx_client_team_members_email ON client_team_members(email);
@@ -1238,10 +1255,17 @@ CREATE TABLE IF NOT EXISTS project_team_members (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
+-- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
 DO $$ BEGIN
     ALTER TABLE project_team_members ADD CONSTRAINT unique_project_team_member UNIQUE (project_id, team_member_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+EXCEPTION 
+    WHEN duplicate_object THEN NULL;
+    WHEN duplicate_table THEN NULL;
+    WHEN others THEN 
+        IF SQLSTATE = '42P07' THEN NULL;
+        ELSE RAISE;
+        END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_project_team_members_project_id ON project_team_members(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_team_members_team_member_id ON project_team_members(team_member_id);
@@ -1292,10 +1316,17 @@ CREATE TABLE IF NOT EXISTS client_ticket_issues (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
+-- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
 DO $$ BEGIN
     ALTER TABLE client_ticket_issues ADD CONSTRAINT unique_ticket_issue UNIQUE (ticket_id, issue_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+EXCEPTION 
+    WHEN duplicate_object THEN NULL;
+    WHEN duplicate_table THEN NULL;
+    WHEN others THEN 
+        IF SQLSTATE = '42P07' THEN NULL;
+        ELSE RAISE;
+        END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_client_ticket_issues_ticket_id ON client_ticket_issues(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_client_ticket_issues_issue_id ON client_ticket_issues(issue_id);
@@ -1985,10 +2016,17 @@ CREATE TABLE IF NOT EXISTS checkpoint_sync (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
+-- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
 DO $$ BEGIN
     ALTER TABLE checkpoint_sync ADD CONSTRAINT checkpoint_sync_project_id_sheet_id_key UNIQUE (project_id, sheet_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+EXCEPTION 
+    WHEN duplicate_object THEN NULL;
+    WHEN duplicate_table THEN NULL;
+    WHEN others THEN 
+        IF SQLSTATE = '42P07' THEN NULL;
+        ELSE RAISE;
+        END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_checkpoint_sync_project_id ON checkpoint_sync(project_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_sync_created_at ON checkpoint_sync(created_at DESC);
@@ -2018,10 +2056,17 @@ CREATE TABLE IF NOT EXISTS status (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
+-- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
 DO $$ BEGIN
     ALTER TABLE status ADD CONSTRAINT status_project_id_url_key UNIQUE (project_id, url);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+EXCEPTION 
+    WHEN duplicate_object THEN NULL;
+    WHEN duplicate_table THEN NULL;
+    WHEN others THEN 
+        IF SQLSTATE = '42P07' THEN NULL;
+        ELSE RAISE;
+        END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_status_project_id ON status(project_id);
 CREATE INDEX IF NOT EXISTS idx_status_url ON status(url);
@@ -2045,10 +2090,17 @@ CREATE TABLE IF NOT EXISTS status_check (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
+-- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
 DO $$ BEGIN
     ALTER TABLE status_check ADD CONSTRAINT status_check_project_id_test_scenario_url_key UNIQUE (project_id, test_scenario, url);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+EXCEPTION 
+    WHEN duplicate_object THEN NULL;
+    WHEN duplicate_table THEN NULL;
+    WHEN others THEN 
+        IF SQLSTATE = '42P07' THEN NULL;
+        ELSE RAISE;
+        END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_status_check_project_id ON status_check(project_id);
 CREATE INDEX IF NOT EXISTS idx_status_check_url ON status_check(url);
