@@ -7,6 +7,10 @@
 --
 -- IDEMPOTENT: Safe to run multiple times - uses IF NOT EXISTS patterns
 -- 
+-- ENUM HANDLING: 
+--   - Creates enum if it doesn't exist
+--   - Adds missing values to existing enums (won't break existing data)
+--
 -- Usage:
 --   psql -d your_database -f 000_full_database_setup.sql
 --   OR
@@ -22,259 +26,658 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ============================================================================
 -- SECTION 1: ENUM TYPES
 -- ============================================================================
--- Using DO blocks because PostgreSQL doesn't support CREATE TYPE IF NOT EXISTS
+-- 
+-- Strategy: First try to create enum, then add any missing values
+-- This ensures both fresh installs AND updates work correctly
+--
+-- Note: ALTER TYPE ... ADD VALUE cannot run inside a transaction block
+-- in older PostgreSQL versions, so we use separate DO blocks
+
+-- -----------------------------------------------------------------------------
+-- Helper function to safely add enum values
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION add_enum_value_if_not_exists(
+    enum_type_name TEXT,
+    new_value TEXT
+) RETURNS VOID AS $$
+BEGIN
+    -- Check if the value already exists
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum 
+        WHERE enumtypid = enum_type_name::regtype 
+        AND enumlabel = new_value
+    ) THEN
+        EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS %L', enum_type_name, new_value);
+    END IF;
+EXCEPTION
+    WHEN others THEN
+        RAISE NOTICE 'Could not add value % to enum %: %', new_value, enum_type_name, SQLERRM;
+END;
+$$ LANGUAGE plpgsql;
 
 -- -----------------------------------------------------------------------------
 -- 1.1 Client & Organization Enums
 -- -----------------------------------------------------------------------------
 
+-- client_status
 DO $$ BEGIN
-    CREATE TYPE client_status AS ENUM ('pending', 'active', 'inactive', 'suspended', 'archived');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type client_status already exists'; END $$;
+    CREATE TYPE client_status AS ENUM ('pending');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'inactive';
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'suspended';
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'archived';
 
+-- client_type
 DO $$ BEGIN
-    CREATE TYPE client_type AS ENUM ('a3s', 'p15r', 'partner');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type client_type already exists'; END $$;
+    CREATE TYPE client_type AS ENUM ('a3s');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE client_type ADD VALUE IF NOT EXISTS 'a3s';
+ALTER TYPE client_type ADD VALUE IF NOT EXISTS 'p15r';
+ALTER TYPE client_type ADD VALUE IF NOT EXISTS 'partner';
 
+-- policy_status
 DO $$ BEGIN
-    CREATE TYPE policy_status AS ENUM ('none', 'draft', 'review', 'approved', 'has_policy', 'needs_review', 'needs_creation', 'in_progress', 'completed');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type policy_status already exists'; END $$;
+    CREATE TYPE policy_status AS ENUM ('none');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'none';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'draft';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'review';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'approved';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'has_policy';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'needs_review';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'needs_creation';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'completed';
 
+-- company_size
 DO $$ BEGIN
-    CREATE TYPE company_size AS ENUM ('1-10', '11-50', '51-200', '201-1000', '1000+');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type company_size already exists'; END $$;
+    CREATE TYPE company_size AS ENUM ('1-10');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '1-10';
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '11-50';
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '51-200';
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '201-1000';
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '1000+';
 
+-- pricing_tier
 DO $$ BEGIN
-    CREATE TYPE pricing_tier AS ENUM ('basic', 'professional', 'enterprise', 'custom');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type pricing_tier already exists'; END $$;
+    CREATE TYPE pricing_tier AS ENUM ('basic');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'basic';
+ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'professional';
+ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'enterprise';
+ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'custom';
 
+-- payment_method
 DO $$ BEGIN
-    CREATE TYPE payment_method AS ENUM ('credit_card', 'ach', 'wire', 'check');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type payment_method already exists'; END $$;
+    CREATE TYPE payment_method AS ENUM ('credit_card');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'credit_card';
+ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'ach';
+ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'wire';
+ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'check';
 
+-- communication_preference
 DO $$ BEGIN
-    CREATE TYPE communication_preference AS ENUM ('email', 'phone', 'slack', 'teams');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type communication_preference already exists'; END $$;
+    CREATE TYPE communication_preference AS ENUM ('email');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'email';
+ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'phone';
+ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'slack';
+ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'teams';
 
+-- timeline
 DO $$ BEGIN
-    CREATE TYPE timeline AS ENUM ('immediate', '1-3_months', '3-6_months', '6-12_months', 'ongoing');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type timeline already exists'; END $$;
+    CREATE TYPE timeline AS ENUM ('immediate');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS 'immediate';
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS '1-3_months';
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS '3-6_months';
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS '6-12_months';
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS 'ongoing';
 
+-- accessibility_level
 DO $$ BEGIN
-    CREATE TYPE accessibility_level AS ENUM ('none', 'basic', 'partial', 'compliant');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type accessibility_level already exists'; END $$;
+    CREATE TYPE accessibility_level AS ENUM ('none');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE accessibility_level ADD VALUE IF NOT EXISTS 'none';
+ALTER TYPE accessibility_level ADD VALUE IF NOT EXISTS 'basic';
+ALTER TYPE accessibility_level ADD VALUE IF NOT EXISTS 'partial';
+ALTER TYPE accessibility_level ADD VALUE IF NOT EXISTS 'compliant';
 
+-- reporting_frequency
 DO $$ BEGIN
-    CREATE TYPE reporting_frequency AS ENUM ('weekly', 'bi-weekly', 'monthly', 'quarterly');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type reporting_frequency already exists'; END $$;
+    CREATE TYPE reporting_frequency AS ENUM ('weekly');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'weekly';
+ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'bi-weekly';
+ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'monthly';
+ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'quarterly';
 
+-- billing_frequency
 DO $$ BEGIN
-    CREATE TYPE billing_frequency AS ENUM ('daily', 'weekly', 'bi-weekly', 'monthly', 'quarterly', 'half-yearly', 'yearly');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type billing_frequency already exists'; END $$;
+    CREATE TYPE billing_frequency AS ENUM ('daily');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'daily';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'weekly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'bi-weekly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'monthly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'quarterly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'half-yearly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'yearly';
 
 -- -----------------------------------------------------------------------------
 -- 1.2 Project Enums
 -- -----------------------------------------------------------------------------
 
+-- project_status
 DO $$ BEGIN
-    CREATE TYPE project_status AS ENUM ('planning', 'active', 'on_hold', 'completed', 'cancelled', 'archived');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type project_status already exists'; END $$;
+    CREATE TYPE project_status AS ENUM ('planning');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'planning';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'on_hold';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'cancelled';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'archived';
 
+-- project_priority
 DO $$ BEGIN
-    CREATE TYPE project_priority AS ENUM ('low', 'medium', 'high', 'urgent');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type project_priority already exists'; END $$;
+    CREATE TYPE project_priority AS ENUM ('low');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'low';
+ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'medium';
+ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'high';
+ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'urgent';
 
+-- project_type
 DO $$ BEGIN
-    CREATE TYPE project_type AS ENUM ('audit', 'remediation', 'monitoring', 'training', 'consultation', 'full_compliance', 'a3s_program');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type project_type already exists'; END $$;
+    CREATE TYPE project_type AS ENUM ('audit');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'audit';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'remediation';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'monitoring';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'training';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'consultation';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'full_compliance';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'a3s_program';
 
+-- project_platform
 DO $$ BEGIN
-    CREATE TYPE project_platform AS ENUM ('website', 'mobile_app', 'desktop_app', 'web_app', 'api', 'other');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type project_platform already exists'; END $$;
+    CREATE TYPE project_platform AS ENUM ('website');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'website';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'mobile_app';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'desktop_app';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'web_app';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'api';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'other';
 
+-- tech_stack
 DO $$ BEGIN
-    CREATE TYPE tech_stack AS ENUM ('wordpress', 'react', 'vue', 'angular', 'nextjs', 'nuxt', 'laravel', 'django', 'rails', 'nodejs', 'express', 'fastapi', 'spring', 'aspnet', 'flutter', 'react_native', 'ionic', 'xamarin', 'electron', 'tauri', 'wails', 'android_native', 'ios_native', 'unity', 'unreal', 'other');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type tech_stack already exists'; END $$;
+    CREATE TYPE tech_stack AS ENUM ('wordpress');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'wordpress';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'react';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'vue';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'angular';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'nextjs';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'nuxt';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'laravel';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'django';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'rails';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'nodejs';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'express';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'fastapi';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'spring';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'aspnet';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'flutter';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'react_native';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'ionic';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'xamarin';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'electron';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'tauri';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'wails';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'android_native';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'ios_native';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'unity';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'unreal';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'other';
 
+-- billing_type
 DO $$ BEGIN
-    CREATE TYPE billing_type AS ENUM ('fixed', 'hourly', 'milestone');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type billing_type already exists'; END $$;
+    CREATE TYPE billing_type AS ENUM ('fixed');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE billing_type ADD VALUE IF NOT EXISTS 'fixed';
+ALTER TYPE billing_type ADD VALUE IF NOT EXISTS 'hourly';
+ALTER TYPE billing_type ADD VALUE IF NOT EXISTS 'milestone';
 
+-- project_wcag_level
 DO $$ BEGIN
-    CREATE TYPE project_wcag_level AS ENUM ('A', 'AA', 'AAA');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type project_wcag_level already exists'; END $$;
+    CREATE TYPE project_wcag_level AS ENUM ('A');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_wcag_level ADD VALUE IF NOT EXISTS 'A';
+ALTER TYPE project_wcag_level ADD VALUE IF NOT EXISTS 'AA';
+ALTER TYPE project_wcag_level ADD VALUE IF NOT EXISTS 'AAA';
 
+-- client_wcag_level
 DO $$ BEGIN
-    CREATE TYPE client_wcag_level AS ENUM ('A', 'AA', 'AAA');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type client_wcag_level already exists'; END $$;
+    CREATE TYPE client_wcag_level AS ENUM ('A');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE client_wcag_level ADD VALUE IF NOT EXISTS 'A';
+ALTER TYPE client_wcag_level ADD VALUE IF NOT EXISTS 'AA';
+ALTER TYPE client_wcag_level ADD VALUE IF NOT EXISTS 'AAA';
 
 -- -----------------------------------------------------------------------------
 -- 1.3 WCAG & Accessibility Enums
 -- -----------------------------------------------------------------------------
 
+-- conformance_level
 DO $$ BEGIN
-    CREATE TYPE conformance_level AS ENUM ('A', 'AA', 'AAA');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type conformance_level already exists'; END $$;
+    CREATE TYPE conformance_level AS ENUM ('A');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE conformance_level ADD VALUE IF NOT EXISTS 'A';
+ALTER TYPE conformance_level ADD VALUE IF NOT EXISTS 'AA';
+ALTER TYPE conformance_level ADD VALUE IF NOT EXISTS 'AAA';
 
+-- severity
 DO $$ BEGIN
-    CREATE TYPE severity AS ENUM ('1_critical', '2_high', '3_medium', '4_low');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type severity already exists'; END $$;
+    CREATE TYPE severity AS ENUM ('1_critical');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE severity ADD VALUE IF NOT EXISTS '1_critical';
+ALTER TYPE severity ADD VALUE IF NOT EXISTS '2_high';
+ALTER TYPE severity ADD VALUE IF NOT EXISTS '3_medium';
+ALTER TYPE severity ADD VALUE IF NOT EXISTS '4_low';
 
+-- issue_type
 DO $$ BEGIN
-    CREATE TYPE issue_type AS ENUM ('automated_tools', 'screen_reader', 'keyboard_navigation', 'color_contrast', 'text_spacing', 'browser_zoom', 'other');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type issue_type already exists'; END $$;
+    CREATE TYPE issue_type AS ENUM ('automated_tools');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'automated_tools';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'screen_reader';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'keyboard_navigation';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'color_contrast';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'text_spacing';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'browser_zoom';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'other';
 
+-- dev_status
 DO $$ BEGIN
-    CREATE TYPE dev_status AS ENUM ('not_started', 'in_progress', 'done', 'blocked', '3rd_party', 'wont_fix');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type dev_status already exists'; END $$;
+    CREATE TYPE dev_status AS ENUM ('not_started');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'not_started';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'done';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'blocked';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS '3rd_party';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'wont_fix';
 
+-- qa_status
 DO $$ BEGIN
-    CREATE TYPE qa_status AS ENUM ('not_started', 'in_progress', 'fixed', 'verified', 'failed', '3rd_party');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type qa_status already exists'; END $$;
+    CREATE TYPE qa_status AS ENUM ('not_started');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'not_started';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'fixed';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'verified';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'failed';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS '3rd_party';
 
+-- url_category
 DO $$ BEGIN
-    CREATE TYPE url_category AS ENUM ('home', 'content', 'form', 'admin', 'other');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type url_category already exists'; END $$;
+    CREATE TYPE url_category AS ENUM ('home');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'home';
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'content';
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'form';
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'admin';
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'other';
 
 -- -----------------------------------------------------------------------------
 -- 1.4 Ticket Enums
 -- -----------------------------------------------------------------------------
 
+-- ticket_status
 DO $$ BEGIN
-    CREATE TYPE ticket_status AS ENUM ('open', 'in_progress', 'resolved', 'closed');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type ticket_status already exists'; END $$;
+    CREATE TYPE ticket_status AS ENUM ('open');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'open';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'resolved';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'closed';
 
+-- ticket_priority
 DO $$ BEGIN
-    CREATE TYPE ticket_priority AS ENUM ('low', 'medium', 'high', 'critical');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type ticket_priority already exists'; END $$;
+    CREATE TYPE ticket_priority AS ENUM ('low');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'low';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'medium';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'high';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'critical';
 
+-- ticket_type
 DO $$ BEGIN
-    CREATE TYPE ticket_type AS ENUM ('bug', 'feature', 'task', 'accessibility', 'improvement');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type ticket_type already exists'; END $$;
+    CREATE TYPE ticket_type AS ENUM ('bug');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'bug';
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'feature';
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'task';
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'accessibility';
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'improvement';
 
+-- ticket_category
 DO $$ BEGIN
-    CREATE TYPE ticket_category AS ENUM ('technical', 'billing', 'general', 'feature_request', 'bug_report', 'other');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type ticket_category already exists'; END $$;
+    CREATE TYPE ticket_category AS ENUM ('technical');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'technical';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'billing';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'general';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'feature_request';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'bug_report';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'other';
 
 -- -----------------------------------------------------------------------------
 -- 1.5 Report Enums
 -- -----------------------------------------------------------------------------
 
+-- report_type
 DO $$ BEGIN
-    CREATE TYPE report_type AS ENUM ('executive_summary', 'technical_report', 'compliance_report', 'monthly_progress', 'custom');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type report_type already exists'; END $$;
+    CREATE TYPE report_type AS ENUM ('executive_summary');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'executive_summary';
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'technical_report';
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'compliance_report';
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'monthly_progress';
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'custom';
 
+-- report_status
 DO $$ BEGIN
-    CREATE TYPE report_status AS ENUM ('draft', 'generated', 'edited', 'sent', 'archived');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type report_status already exists'; END $$;
+    CREATE TYPE report_status AS ENUM ('draft');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'draft';
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'generated';
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'edited';
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'sent';
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'archived';
 
 -- -----------------------------------------------------------------------------
 -- 1.6 Team & User Enums
 -- -----------------------------------------------------------------------------
 
+-- team_type
 DO $$ BEGIN
-    CREATE TYPE team_type AS ENUM ('internal', 'external');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type team_type already exists'; END $$;
+    CREATE TYPE team_type AS ENUM ('internal');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE team_type ADD VALUE IF NOT EXISTS 'internal';
+ALTER TYPE team_type ADD VALUE IF NOT EXISTS 'external';
 
+-- employee_role
 DO $$ BEGIN
-    CREATE TYPE employee_role AS ENUM ('ceo', 'manager', 'team_lead', 'senior_developer', 'developer', 'junior_developer', 'designer', 'qa_engineer', 'project_manager', 'business_analyst', 'consultant', 'contractor');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type employee_role already exists'; END $$;
+    CREATE TYPE employee_role AS ENUM ('ceo');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'ceo';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'manager';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'team_lead';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'senior_developer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'developer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'junior_developer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'designer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'qa_engineer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'project_manager';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'business_analyst';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'consultant';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'contractor';
 
+-- employment_status
 DO $$ BEGIN
-    CREATE TYPE employment_status AS ENUM ('active', 'inactive', 'on_leave', 'terminated');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type employment_status already exists'; END $$;
+    CREATE TYPE employment_status AS ENUM ('active');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'inactive';
+ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'on_leave';
+ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'terminated';
 
+-- developer_role
 DO $$ BEGIN
-    CREATE TYPE developer_role AS ENUM ('project_lead', 'senior_developer', 'developer', 'qa_engineer', 'accessibility_specialist');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type developer_role already exists'; END $$;
+    CREATE TYPE developer_role AS ENUM ('project_lead');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'project_lead';
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'senior_developer';
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'developer';
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'qa_engineer';
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'accessibility_specialist';
 
+-- user_role
 DO $$ BEGIN
-    CREATE TYPE user_role AS ENUM ('viewer', 'editor', 'admin', 'owner');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type user_role already exists'; END $$;
+    CREATE TYPE user_role AS ENUM ('viewer');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'viewer';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'editor';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'admin';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'owner';
 
+-- project_role
 DO $$ BEGIN
-    CREATE TYPE project_role AS ENUM ('project_admin', 'project_member');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type project_role already exists'; END $$;
+    CREATE TYPE project_role AS ENUM ('project_admin');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_role ADD VALUE IF NOT EXISTS 'project_admin';
+ALTER TYPE project_role ADD VALUE IF NOT EXISTS 'project_member';
 
+-- invitation_status
 DO $$ BEGIN
-    CREATE TYPE invitation_status AS ENUM ('pending', 'sent', 'accepted', 'expired', 'cancelled');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type invitation_status already exists'; END $$;
+    CREATE TYPE invitation_status AS ENUM ('pending');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'sent';
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'accepted';
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'expired';
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'cancelled';
 
 -- -----------------------------------------------------------------------------
 -- 1.7 Document Enums
 -- -----------------------------------------------------------------------------
 
+-- document_type
 DO $$ BEGIN
-    CREATE TYPE document_type AS ENUM ('audit_report', 'remediation_plan', 'test_results', 'compliance_certificate', 'meeting_notes', 'vpat', 'accessibility_summary', 'legal_response', 'monthly_monitoring', 'custom', 'other');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type document_type already exists'; END $$;
+    CREATE TYPE document_type AS ENUM ('audit_report');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'audit_report';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'remediation_plan';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'test_results';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'compliance_certificate';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'meeting_notes';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'vpat';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'accessibility_summary';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'legal_response';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'monthly_monitoring';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'custom';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'other';
 
+-- document_status
 DO $$ BEGIN
-    CREATE TYPE document_status AS ENUM ('draft', 'pending_review', 'certified', 'active', 'archived');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type document_status already exists'; END $$;
+    CREATE TYPE document_status AS ENUM ('draft');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'draft';
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'pending_review';
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'certified';
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'archived';
 
+-- document_request_status
 DO $$ BEGIN
-    CREATE TYPE document_request_status AS ENUM ('pending', 'in_progress', 'completed', 'rejected');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type document_request_status already exists'; END $$;
+    CREATE TYPE document_request_status AS ENUM ('pending');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'rejected';
 
+-- document_priority
 DO $$ BEGIN
-    CREATE TYPE document_priority AS ENUM ('low', 'medium', 'high', 'critical');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type document_priority already exists'; END $$;
+    CREATE TYPE document_priority AS ENUM ('low');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'low';
+ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'medium';
+ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'high';
+ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'critical';
 
+-- remediation_type
 DO $$ BEGIN
-    CREATE TYPE remediation_type AS ENUM ('traditional_pdf', 'html_alternative');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type remediation_type already exists'; END $$;
+    CREATE TYPE remediation_type AS ENUM ('traditional_pdf');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE remediation_type ADD VALUE IF NOT EXISTS 'traditional_pdf';
+ALTER TYPE remediation_type ADD VALUE IF NOT EXISTS 'html_alternative';
 
+-- remediation_status
 DO $$ BEGIN
-    CREATE TYPE remediation_status AS ENUM ('pending_review', 'approved', 'in_progress', 'completed', 'rejected');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type remediation_status already exists'; END $$;
+    CREATE TYPE remediation_status AS ENUM ('pending_review');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'pending_review';
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'approved';
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'rejected';
 
 -- -----------------------------------------------------------------------------
 -- 1.8 Notification Enums
 -- -----------------------------------------------------------------------------
 
+-- notification_type
 DO $$ BEGIN
-    CREATE TYPE notification_type AS ENUM ('system', 'project_update', 'document_ready', 'document_approved', 'document_rejected', 'report_ready', 'team_invite', 'ticket_update', 'evidence_update', 'billing', 'reminder');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type notification_type already exists'; END $$;
+    CREATE TYPE notification_type AS ENUM ('system');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'system';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'project_update';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_ready';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_approved';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_rejected';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'report_ready';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'team_invite';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'ticket_update';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'evidence_update';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'billing';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'reminder';
 
+-- notification_priority
 DO $$ BEGIN
-    CREATE TYPE notification_priority AS ENUM ('low', 'normal', 'high', 'urgent');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type notification_priority already exists'; END $$;
+    CREATE TYPE notification_priority AS ENUM ('low');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'low';
+ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'normal';
+ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'high';
+ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'urgent';
 
 -- -----------------------------------------------------------------------------
 -- 1.9 Other Enums
 -- -----------------------------------------------------------------------------
 
+-- activity_action
 DO $$ BEGIN
-    CREATE TYPE activity_action AS ENUM ('created', 'updated', 'milestone_completed', 'developer_assigned', 'status_changed', 'document_uploaded', 'time_logged', 'staging_credentials_updated');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type activity_action already exists'; END $$;
+    CREATE TYPE activity_action AS ENUM ('created');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'created';
+ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'updated';
+ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'milestone_completed';
+ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'developer_assigned';
+ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'status_changed';
+ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'document_uploaded';
+ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'time_logged';
+ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'staging_credentials_updated';
 
+-- milestone_status
 DO $$ BEGIN
-    CREATE TYPE milestone_status AS ENUM ('pending', 'in_progress', 'completed', 'overdue');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type milestone_status already exists'; END $$;
+    CREATE TYPE milestone_status AS ENUM ('pending');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'overdue';
 
+-- time_entry_category
 DO $$ BEGIN
-    CREATE TYPE time_entry_category AS ENUM ('development', 'testing', 'review', 'meeting', 'documentation', 'research');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type time_entry_category already exists'; END $$;
+    CREATE TYPE time_entry_category AS ENUM ('development');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'development';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'testing';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'review';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'meeting';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'documentation';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'research';
 
+-- credential_type
 DO $$ BEGIN
-    CREATE TYPE credential_type AS ENUM ('staging', 'production', 'development', 'testing', 'wordpress', 'httpauth', 'sftp', 'database', 'app_store', 'play_store', 'firebase', 'aws', 'azure', 'gcp', 'heroku', 'vercel', 'netlify', 'github', 'gitlab', 'bitbucket', 'docker', 'kubernetes', 'cms', 'api_key', 'oauth', 'ssh_key', 'ssl_certificate', 'cdn', 'analytics', 'monitoring', 'other');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type credential_type already exists'; END $$;
+    CREATE TYPE credential_type AS ENUM ('staging');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'staging';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'production';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'development';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'testing';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'wordpress';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'httpauth';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'sftp';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'database';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'app_store';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'play_store';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'firebase';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'aws';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'azure';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'gcp';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'heroku';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'vercel';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'netlify';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'github';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'gitlab';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'bitbucket';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'docker';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'kubernetes';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'cms';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'api_key';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'oauth';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'ssh_key';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'ssl_certificate';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'cdn';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'analytics';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'monitoring';
+ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'other';
 
+-- comment_type
 DO $$ BEGIN
-    CREATE TYPE comment_type AS ENUM ('general', 'dev_update', 'qa_feedback', 'technical_note', 'resolution');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type comment_type already exists'; END $$;
+    CREATE TYPE comment_type AS ENUM ('general');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'general';
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'dev_update';
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'qa_feedback';
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'technical_note';
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'resolution';
 
+-- author_role
 DO $$ BEGIN
-    CREATE TYPE author_role AS ENUM ('developer', 'qa_tester', 'accessibility_expert', 'project_manager', 'client');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type author_role already exists'; END $$;
+    CREATE TYPE author_role AS ENUM ('developer');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'developer';
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'qa_tester';
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'accessibility_expert';
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'project_manager';
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'client';
 
+-- billing_addon_type
 DO $$ BEGIN
-    CREATE TYPE billing_addon_type AS ENUM ('team_members', 'document_remediation', 'evidence_locker', 'custom');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type billing_addon_type already exists'; END $$;
+    CREATE TYPE billing_addon_type AS ENUM ('team_members');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'team_members';
+ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'document_remediation';
+ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'evidence_locker';
+ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'custom';
 
+-- billing_addon_status
 DO $$ BEGIN
-    CREATE TYPE billing_addon_status AS ENUM ('active', 'cancelled', 'pending');
-EXCEPTION WHEN duplicate_object THEN RAISE NOTICE 'type billing_addon_status already exists'; END $$;
+    CREATE TYPE billing_addon_status AS ENUM ('active');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'cancelled';
+ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'pending';
 
 -- ============================================================================
 -- SECTION 2: CORE TABLES (SHARED BY ADMIN & PORTAL)
@@ -374,10 +777,19 @@ CREATE TABLE IF NOT EXISTS projects (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     created_by VARCHAR(255) NOT NULL,
-    last_modified_by VARCHAR(255) NOT NULL,
-    CONSTRAINT check_critical_sla_days CHECK (critical_issue_sla_days >= 1 AND critical_issue_sla_days <= 365),
-    CONSTRAINT check_high_sla_days CHECK (high_issue_sla_days >= 1 AND high_issue_sla_days <= 365)
+    last_modified_by VARCHAR(255) NOT NULL
 );
+
+-- Add constraints if they don't exist
+DO $$ BEGIN
+    ALTER TABLE projects ADD CONSTRAINT check_critical_sla_days 
+        CHECK (critical_issue_sla_days >= 1 AND critical_issue_sla_days <= 365);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE projects ADD CONSTRAINT check_high_sla_days 
+        CHECK (high_issue_sla_days >= 1 AND high_issue_sla_days <= 365);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Project indexes
 CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
@@ -422,7 +834,6 @@ CREATE TABLE IF NOT EXISTS test_urls (
 -- Test URLs indexes
 CREATE UNIQUE INDEX IF NOT EXISTS test_urls_project_url_idx ON test_urls(project_id, url);
 CREATE INDEX IF NOT EXISTS idx_test_urls_project_id ON test_urls(project_id);
-CREATE INDEX IF NOT EXISTS idx_test_urls_is_active ON test_urls(is_active) WHERE is_active = TRUE;
 
 -- -----------------------------------------------------------------------------
 -- 2.4 Accessibility Issues Table (CRITICAL TABLE)
@@ -479,9 +890,13 @@ CREATE TABLE IF NOT EXISTS accessibility_issues (
     sheet_name TEXT,
     sheet_row_number INTEGER,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT unique_project_issue_id UNIQUE (project_id, issue_id)
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE accessibility_issues ADD CONSTRAINT unique_project_issue_id UNIQUE (project_id, issue_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Accessibility Issues indexes (MOST QUERIED TABLE - comprehensive indexing)
 CREATE UNIQUE INDEX IF NOT EXISTS accessibility_issues_project_url_title_unique ON accessibility_issues(project_id, url_id, issue_title);
@@ -508,9 +923,6 @@ CREATE INDEX IF NOT EXISTS idx_issues_complex ON accessibility_issues(project_id
 CREATE INDEX IF NOT EXISTS idx_accessibility_issues_dev_status_updated_at ON accessibility_issues(dev_status_updated_at);
 CREATE INDEX IF NOT EXISTS idx_accessibility_issues_qa_status_updated_at ON accessibility_issues(qa_status_updated_at);
 CREATE INDEX IF NOT EXISTS idx_accessibility_issues_metadata ON accessibility_issues USING GIN (metadata);
-
--- Partial indexes for performance
-CREATE INDEX IF NOT EXISTS idx_issues_active_severity ON accessibility_issues(is_active, severity) WHERE is_active = TRUE;
 
 -- -----------------------------------------------------------------------------
 -- 2.5 Reports Table
@@ -556,9 +968,13 @@ CREATE TABLE IF NOT EXISTS report_issues (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     report_id UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
     issue_id UUID NOT NULL REFERENCES accessibility_issues(id) ON DELETE CASCADE,
-    included_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT unique_report_issue UNIQUE (report_id, issue_id)
+    included_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE report_issues ADD CONSTRAINT unique_report_issue UNIQUE (report_id, issue_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_report_issues_report_id ON report_issues(report_id);
 CREATE INDEX IF NOT EXISTS idx_report_issues_issue_id ON report_issues(issue_id);
@@ -629,9 +1045,14 @@ CREATE TABLE IF NOT EXISTS issues (
     qa_status_updated_at TIMESTAMP,
     metadata JSONB,
     issue_logged_at TIMESTAMP DEFAULT NOW(),
-    issue_updated_at TIMESTAMP,
-    CONSTRAINT issues_project_id_sheet_name_url_issue_title_key UNIQUE (project_id, sheet_name, url, issue_title)
+    issue_updated_at TIMESTAMP
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE issues ADD CONSTRAINT issues_project_id_sheet_name_url_issue_title_key 
+        UNIQUE (project_id, sheet_name, url, issue_title);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
 CREATE INDEX IF NOT EXISTS idx_issues_url ON issues(url);
@@ -663,14 +1084,17 @@ CREATE TABLE IF NOT EXISTS client_users (
     email_notifications BOOLEAN NOT NULL DEFAULT TRUE,
     last_login_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT unique_clerk_client UNIQUE (clerk_user_id, client_id)
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE client_users ADD CONSTRAINT unique_clerk_client UNIQUE (clerk_user_id, client_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_client_users_clerk_user_id ON client_users(clerk_user_id);
 CREATE INDEX IF NOT EXISTS idx_client_users_client_id ON client_users(client_id);
 CREATE INDEX IF NOT EXISTS idx_client_users_email ON client_users(email);
-CREATE INDEX IF NOT EXISTS idx_client_users_is_active ON client_users(is_active) WHERE is_active = TRUE;
 
 -- -----------------------------------------------------------------------------
 -- 3.2 Client Team Members Table (Invitations)
@@ -691,9 +1115,13 @@ CREATE TABLE IF NOT EXISTS client_team_members (
     linked_user_id UUID REFERENCES client_users(id) ON DELETE SET NULL,
     pending_project_ids JSONB DEFAULT '[]',
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT unique_client_team_member_email UNIQUE (client_id, email)
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE client_team_members ADD CONSTRAINT unique_client_team_member_email UNIQUE (client_id, email);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_client_team_members_client_id ON client_team_members(client_id);
 CREATE INDEX IF NOT EXISTS idx_client_team_members_email ON client_team_members(email);
@@ -710,9 +1138,13 @@ CREATE TABLE IF NOT EXISTS project_team_members (
     team_member_id UUID NOT NULL REFERENCES client_users(id) ON DELETE CASCADE,
     role project_role NOT NULL DEFAULT 'project_member',
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT unique_project_team_member UNIQUE (project_id, team_member_id)
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE project_team_members ADD CONSTRAINT unique_project_team_member UNIQUE (project_id, team_member_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_project_team_members_project_id ON project_team_members(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_team_members_team_member_id ON project_team_members(team_member_id);
@@ -754,9 +1186,13 @@ CREATE TABLE IF NOT EXISTS client_ticket_issues (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ticket_id UUID NOT NULL REFERENCES client_tickets(id) ON DELETE CASCADE,
     issue_id UUID NOT NULL REFERENCES accessibility_issues(id) ON DELETE CASCADE,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT unique_ticket_issue UNIQUE (ticket_id, issue_id)
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE client_ticket_issues ADD CONSTRAINT unique_ticket_issue UNIQUE (ticket_id, issue_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_client_ticket_issues_ticket_id ON client_ticket_issues(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_client_ticket_issues_issue_id ON client_ticket_issues(issue_id);
@@ -919,9 +1355,6 @@ CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
 CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
 CREATE INDEX IF NOT EXISTS idx_notifications_is_archived ON notifications(is_archived);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_notifications_expires_at ON notifications(expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read, is_archived) WHERE is_read = FALSE AND is_archived = FALSE;
-CREATE INDEX IF NOT EXISTS idx_notifications_client_unread ON notifications(client_id, is_read, is_archived) WHERE is_read = FALSE AND is_archived = FALSE;
 
 -- ============================================================================
 -- SECTION 4: ADMIN-ONLY TABLES
@@ -1324,9 +1757,13 @@ CREATE TABLE IF NOT EXISTS checkpoint_sync (
     sheet_id TEXT NOT NULL,
     last_synced_row TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT checkpoint_sync_project_id_sheet_id_key UNIQUE (project_id, sheet_id)
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE checkpoint_sync ADD CONSTRAINT checkpoint_sync_project_id_sheet_id_key UNIQUE (project_id, sheet_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_checkpoint_sync_project_id ON checkpoint_sync(project_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_sync_created_at ON checkpoint_sync(created_at DESC);
@@ -1352,9 +1789,13 @@ CREATE TABLE IF NOT EXISTS status (
     color_contrast TEXT,
     is_active TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT status_project_id_url_key UNIQUE (project_id, url)
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE status ADD CONSTRAINT status_project_id_url_key UNIQUE (project_id, url);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_status_project_id ON status(project_id);
 CREATE INDEX IF NOT EXISTS idx_status_url ON status(url);
@@ -1374,9 +1815,13 @@ CREATE TABLE IF NOT EXISTS status_check (
     status TEXT,
     notes TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT status_check_project_id_test_scenario_url_key UNIQUE (project_id, test_scenario, url)
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Add unique constraint if it doesn't exist
+DO $$ BEGIN
+    ALTER TABLE status_check ADD CONSTRAINT status_check_project_id_test_scenario_url_key UNIQUE (project_id, test_scenario, url);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_status_check_project_id ON status_check(project_id);
 CREATE INDEX IF NOT EXISTS idx_status_check_url ON status_check(url);
@@ -1513,7 +1958,14 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- SECTION 6: VERIFICATION QUERIES
+-- SECTION 6: CLEANUP HELPER FUNCTION
+-- ============================================================================
+
+-- Drop the helper function if we created it
+DROP FUNCTION IF EXISTS add_enum_value_if_not_exists(TEXT, TEXT);
+
+-- ============================================================================
+-- SECTION 7: VERIFICATION QUERIES
 -- ============================================================================
 
 -- Display all created tables
@@ -1543,4 +1995,3 @@ SELECT
 -- ============================================================================
 
 SELECT 'A3S Platform database setup complete!' as status;
-
