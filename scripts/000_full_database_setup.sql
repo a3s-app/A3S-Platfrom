@@ -1356,6 +1356,147 @@ CREATE TABLE IF NOT EXISTS wcag_url_check (
 );
 
 -- ============================================================================
+-- SECTION 2.5: ADD MISSING COLUMNS TO EXISTING TABLES
+-- ============================================================================
+-- This section ensures that if tables already exist but are missing newer columns,
+-- those columns get added. Uses explicit column existence checks for compatibility.
+
+-- Helper function to safely add columns
+CREATE OR REPLACE FUNCTION add_column_if_not_exists(
+    _table TEXT,
+    _column TEXT,
+    _type TEXT,
+    _default TEXT DEFAULT NULL
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = _table 
+        AND column_name = _column
+    ) THEN
+        IF _default IS NOT NULL THEN
+            EXECUTE format('ALTER TABLE %I ADD COLUMN %I %s DEFAULT %s', _table, _column, _type, _default);
+        ELSE
+            EXECUTE format('ALTER TABLE %I ADD COLUMN %I %s', _table, _column, _type);
+        END IF;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Clients table - add missing columns
+SELECT add_column_if_not_exists('clients', 'requires_legal_documentation', 'BOOLEAN', 'false');
+SELECT add_column_if_not_exists('clients', 'compliance_documents', 'TEXT[]', 'NULL');
+SELECT add_column_if_not_exists('clients', 'existing_audits', 'BOOLEAN', 'false');
+SELECT add_column_if_not_exists('clients', 'previous_audit_results', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('clients', 'team_member_limit', 'INTEGER NOT NULL', '5');
+SELECT add_column_if_not_exists('clients', 'client_type', 'client_type NOT NULL', '''a3s''');
+SELECT add_column_if_not_exists('clients', 'policy_status', 'policy_status NOT NULL', '''none''');
+SELECT add_column_if_not_exists('clients', 'policy_notes', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('clients', 'client_documents', 'TEXT', 'NULL');
+
+-- Projects table - add missing columns
+SELECT add_column_if_not_exists('projects', 'project_platform', 'VARCHAR(50) NOT NULL', '''website''');
+SELECT add_column_if_not_exists('projects', 'tech_stack', 'VARCHAR(50) NOT NULL', '''other''');
+SELECT add_column_if_not_exists('projects', 'website_url', 'VARCHAR(500)', 'NULL');
+SELECT add_column_if_not_exists('projects', 'testing_methodology', 'TEXT[] NOT NULL', '''{}''');
+SELECT add_column_if_not_exists('projects', 'testing_schedule', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('projects', 'bug_severity_workflow', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('projects', 'default_testing_month', 'VARCHAR(20)', 'NULL');
+SELECT add_column_if_not_exists('projects', 'default_testing_year', 'INTEGER', 'NULL');
+SELECT add_column_if_not_exists('projects', 'critical_issue_sla_days', 'INTEGER', '45');
+SELECT add_column_if_not_exists('projects', 'high_issue_sla_days', 'INTEGER', '30');
+SELECT add_column_if_not_exists('projects', 'sync_status_summary', 'JSONB', '''{}''');
+SELECT add_column_if_not_exists('projects', 'last_sync_details', 'JSONB', '''{}''');
+SELECT add_column_if_not_exists('projects', 'credentials', 'JSONB', '''[]''');
+SELECT add_column_if_not_exists('projects', 'credentials_backup', 'JSONB', 'NULL');
+
+-- Test URLs table - add missing columns
+SELECT add_column_if_not_exists('test_urls', 'remediation_month', 'VARCHAR(20)', 'NULL');
+SELECT add_column_if_not_exists('test_urls', 'automated_tools', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('test_urls', 'nvda_chrome', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('test_urls', 'voiceover_iphone_safari', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('test_urls', 'color_contrast', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('test_urls', 'browser_zoom', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('test_urls', 'keyboard_only', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('test_urls', 'text_spacing', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('test_urls', 'status', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('test_urls', 'remediation_year', 'INTEGER', 'NULL');
+
+-- Accessibility Issues table - add missing columns
+SELECT add_column_if_not_exists('accessibility_issues', 'sent_to_user', 'BOOLEAN', 'false');
+SELECT add_column_if_not_exists('accessibility_issues', 'sent_date', 'TIMESTAMP', 'NULL');
+SELECT add_column_if_not_exists('accessibility_issues', 'sent_month', 'VARCHAR(20)', 'NULL');
+SELECT add_column_if_not_exists('accessibility_issues', 'report_id', 'UUID', 'NULL');
+SELECT add_column_if_not_exists('accessibility_issues', 'dev_status_updated_at', 'TIMESTAMP', 'NULL');
+SELECT add_column_if_not_exists('accessibility_issues', 'qa_status_updated_at', 'TIMESTAMP', 'NULL');
+SELECT add_column_if_not_exists('accessibility_issues', 'metadata', 'JSONB', 'NULL');
+SELECT add_column_if_not_exists('accessibility_issues', 'sheet_name', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('accessibility_issues', 'sheet_row_number', 'INTEGER', 'NULL');
+SELECT add_column_if_not_exists('accessibility_issues', 'issue_id', 'TEXT NOT NULL', '''unknown''');
+
+-- Reports table - add missing columns
+SELECT add_column_if_not_exists('reports', 'report_month', 'VARCHAR(20)', 'NULL');
+SELECT add_column_if_not_exists('reports', 'report_year', 'INTEGER', 'NULL');
+SELECT add_column_if_not_exists('reports', 'is_public', 'BOOLEAN NOT NULL', 'false');
+SELECT add_column_if_not_exists('reports', 'public_token', 'VARCHAR(64)', 'NULL');
+
+-- Client Team Members - add missing columns
+SELECT add_column_if_not_exists('client_team_members', 'clerk_invitation_id', 'VARCHAR(255)', 'NULL');
+SELECT add_column_if_not_exists('client_team_members', 'pending_project_ids', 'JSONB', '''[]''');
+
+-- Project Team Members - add missing columns
+SELECT add_column_if_not_exists('project_team_members', 'display_name', 'VARCHAR(255)', 'NULL');
+
+-- Client Tickets - add missing columns
+SELECT add_column_if_not_exists('client_tickets', 'issues_id', 'VARCHAR(255)', 'NULL');
+SELECT add_column_if_not_exists('client_tickets', 'created_by_user_id', 'UUID', 'NULL');
+SELECT add_column_if_not_exists('client_tickets', 'related_issue_id', 'UUID', 'NULL');
+SELECT add_column_if_not_exists('client_tickets', 'internal_notes', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('client_tickets', 'resolution', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('client_tickets', 'resolved_at', 'TIMESTAMP', 'NULL');
+SELECT add_column_if_not_exists('client_tickets', 'closed_at', 'TIMESTAMP', 'NULL');
+
+-- Document Remediations - add missing columns
+SELECT add_column_if_not_exists('document_remediations', 'price_adjusted', 'BOOLEAN', 'false');
+SELECT add_column_if_not_exists('document_remediations', 'original_price_per_page', 'NUMERIC(10,2)', 'NULL');
+SELECT add_column_if_not_exists('document_remediations', 'original_total_price', 'NUMERIC(10,2)', 'NULL');
+SELECT add_column_if_not_exists('document_remediations', 'reviewed_by_user_id', 'UUID', 'NULL');
+SELECT add_column_if_not_exists('document_remediations', 'reviewed_at', 'TIMESTAMP', 'NULL');
+SELECT add_column_if_not_exists('document_remediations', 'rejection_reason', 'TEXT', 'NULL');
+
+-- Teams - add missing columns
+SELECT add_column_if_not_exists('teams', 'department', 'department', 'NULL');
+SELECT add_column_if_not_exists('teams', 'status', 'team_status NOT NULL', '''active''');
+SELECT add_column_if_not_exists('teams', 'team_lead_id', 'UUID', 'NULL');
+SELECT add_column_if_not_exists('teams', 'created_by', 'VARCHAR(255)', 'NULL');
+SELECT add_column_if_not_exists('teams', 'max_members', 'VARCHAR(50)', 'NULL');
+SELECT add_column_if_not_exists('teams', 'location', 'VARCHAR(255)', 'NULL');
+SELECT add_column_if_not_exists('teams', 'working_hours', 'VARCHAR(100)', 'NULL');
+SELECT add_column_if_not_exists('teams', 'email', 'VARCHAR(255)', 'NULL');
+SELECT add_column_if_not_exists('teams', 'slack_channel', 'VARCHAR(255)', 'NULL');
+SELECT add_column_if_not_exists('teams', 'budget', 'VARCHAR(50)', 'NULL');
+SELECT add_column_if_not_exists('teams', 'notes', 'TEXT', 'NULL');
+SELECT add_column_if_not_exists('teams', 'is_active', 'BOOLEAN NOT NULL', 'true');
+SELECT add_column_if_not_exists('teams', 'manager_id', 'UUID', 'NULL');
+SELECT add_column_if_not_exists('teams', 'team_type', 'VARCHAR(50)', '''internal''');
+
+-- Tickets (admin) - add missing columns
+SELECT add_column_if_not_exists('tickets', 'client_id', 'UUID', 'NULL');
+SELECT add_column_if_not_exists('tickets', 'related_issue_ids', 'TEXT[]', '''{}''');
+SELECT add_column_if_not_exists('tickets', 'ticket_category', 'VARCHAR(50)', '''general''');
+
+-- Project Team Assignments - add missing columns
+SELECT add_column_if_not_exists('project_team_assignments', 'assigned_by', 'VARCHAR(255)', 'NULL');
+SELECT add_column_if_not_exists('project_team_assignments', 'notes', 'TEXT', 'NULL');
+
+-- Project Staging Credentials - add missing columns
+SELECT add_column_if_not_exists('project_staging_credentials', 'credentials', 'JSONB', '''{}''');
+
+-- Drop the helper function
+DROP FUNCTION IF EXISTS add_column_if_not_exists(TEXT, TEXT, TEXT, TEXT);
+
+-- ============================================================================
 -- SECTION 3: UNIQUE CONSTRAINTS (with safe handling)
 -- ============================================================================
 
