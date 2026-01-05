@@ -22,6 +22,23 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================================================
+-- SECTION 0: ADD MISSING VALUES TO EXISTING ENUMS
+-- ============================================================================
+-- These enums exist in the new DB but are missing some values from production
+
+-- ticket_status - add missing values
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'needs_attention';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'third_party';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'fixed';
+
+-- ticket_priority - ensure all values exist
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'low';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'medium';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'high';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'critical';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'urgent';
+
+-- ============================================================================
 -- SECTION 1: ADD MISSING ENUMS (15 total)
 -- ============================================================================
 
