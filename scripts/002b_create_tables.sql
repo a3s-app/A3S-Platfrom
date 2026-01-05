@@ -1,166 +1,22 @@
 -- ============================================================================
--- A3S PLATFORM - MIGRATION SCRIPT TO MATCH PRODUCTION SCHEMA
+-- A3S PLATFORM - PART B: CREATE TABLES
 -- ============================================================================
 -- 
--- This script migrates a partial database to match the full production schema.
--- Run this on a database that has some tables but is missing others.
+-- IMPORTANT: Run 002a_add_enum_values.sql FIRST before running this script!
 --
--- SOURCE: Production database (nsaovodiykewfluipkam)
+-- This script creates all missing tables and adds missing columns.
+-- The enum values must already exist (added by Part A).
+--
 -- TARGET: New database (kwxnfskctsfccvysokxo)
 --
--- DIFFERENCES FOUND:
---   - 15 missing enums
---   - 13 missing tables
---   - 4 missing columns in existing tables
---
--- IDEMPOTENT: Safe to run multiple times
 -- Last Generated: January 2026
 -- ============================================================================
 
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
 -- ============================================================================
--- SECTION 0: ADD MISSING VALUES TO EXISTING ENUMS
--- ============================================================================
--- These enums exist in the new DB but are missing some values from production
-
--- ticket_status - add missing values
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'needs_attention';
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'third_party';
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'fixed';
-
--- ticket_priority - ensure all values exist
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'low';
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'medium';
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'high';
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'critical';
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'urgent';
-
--- ============================================================================
--- SECTION 1: ADD MISSING ENUMS (15 total)
+-- SECTION 1: CREATE MISSING TABLES (13 total)
 -- ============================================================================
 
--- 1. admin_notification_type
-DO $$ BEGIN CREATE TYPE admin_notification_type AS ENUM ('system'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_ticket';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_remediation_request';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_document_request';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'client_signup';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'system';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'custom';
-
--- 2. billing_addon_status
-DO $$ BEGIN CREATE TYPE billing_addon_status AS ENUM ('active'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'active';
-ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'cancelled';
-ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'pending';
-
--- 3. billing_addon_type
-DO $$ BEGIN CREATE TYPE billing_addon_type AS ENUM ('custom'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'team_members';
-ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'document_remediation';
-ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'evidence_locker';
-ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'custom';
-
--- 4. document_priority
-DO $$ BEGIN CREATE TYPE document_priority AS ENUM ('medium'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'low';
-ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'medium';
-ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'high';
-ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'critical';
-
--- 5. document_request_status
-DO $$ BEGIN CREATE TYPE document_request_status AS ENUM ('pending'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'pending';
-ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'in_progress';
-ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'completed';
-ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'rejected';
-
--- 6. document_status
-DO $$ BEGIN CREATE TYPE document_status AS ENUM ('draft'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'draft';
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'pending_review';
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'certified';
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'active';
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'archived';
-
--- 7. invitation_status
-DO $$ BEGIN CREATE TYPE invitation_status AS ENUM ('pending'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'pending';
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'sent';
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'accepted';
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'expired';
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'cancelled';
-
--- 8. message_sender_type
-DO $$ BEGIN CREATE TYPE message_sender_type AS ENUM ('admin'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE message_sender_type ADD VALUE IF NOT EXISTS 'admin';
-ALTER TYPE message_sender_type ADD VALUE IF NOT EXISTS 'client';
-
--- 9. notification_priority
-DO $$ BEGIN CREATE TYPE notification_priority AS ENUM ('normal'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'low';
-ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'normal';
-ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'high';
-ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'urgent';
-
--- 10. notification_type
-DO $$ BEGIN CREATE TYPE notification_type AS ENUM ('system'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'system';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'project_update';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_ready';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_approved';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_rejected';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'report_ready';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'team_invite';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'ticket_update';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'evidence_update';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'billing';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'reminder';
-
--- 11. project_role
-DO $$ BEGIN CREATE TYPE project_role AS ENUM ('project_member'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE project_role ADD VALUE IF NOT EXISTS 'project_admin';
-ALTER TYPE project_role ADD VALUE IF NOT EXISTS 'project_member';
-
--- 12. remediation_status
-DO $$ BEGIN CREATE TYPE remediation_status AS ENUM ('pending'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'pending';
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'pending_review';
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'approved';
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'in_progress';
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'completed';
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'rejected';
-
--- 13. remediation_type
-DO $$ BEGIN CREATE TYPE remediation_type AS ENUM ('traditional_pdf'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE remediation_type ADD VALUE IF NOT EXISTS 'traditional_pdf';
-ALTER TYPE remediation_type ADD VALUE IF NOT EXISTS 'html_alternative';
-
--- 14. ticket_category
-DO $$ BEGIN CREATE TYPE ticket_category AS ENUM ('general'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'technical';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'billing';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'general';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'feature_request';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'bug_report';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'other';
-
--- 15. user_role
-DO $$ BEGIN CREATE TYPE user_role AS ENUM ('viewer'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'owner';
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'admin';
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'member';
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'viewer';
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'editor';
-
--- ============================================================================
--- SECTION 2: ADD MISSING TABLES (13 total)
--- ============================================================================
-
--- 2.1 Client Users Table
+-- 1.1 Client Users Table
 CREATE TABLE IF NOT EXISTS client_users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     clerk_user_id VARCHAR(255) NOT NULL,
@@ -176,7 +32,7 @@ CREATE TABLE IF NOT EXISTS client_users (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- 2.2 Client Team Members Table
+-- 1.2 Client Team Members Table
 CREATE TABLE IF NOT EXISTS client_team_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -195,7 +51,7 @@ CREATE TABLE IF NOT EXISTS client_team_members (
     pending_project_ids JSONB DEFAULT '[]'
 );
 
--- 2.3 Project Team Members Table
+-- 1.3 Project Team Members Table
 CREATE TABLE IF NOT EXISTS project_team_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -206,7 +62,7 @@ CREATE TABLE IF NOT EXISTS project_team_members (
     display_name VARCHAR(255)
 );
 
--- 2.4 Client Tickets Table
+-- 1.4 Client Tickets Table
 CREATE TABLE IF NOT EXISTS client_tickets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -229,7 +85,7 @@ CREATE TABLE IF NOT EXISTS client_tickets (
     closed_at TIMESTAMP
 );
 
--- 2.5 Client Ticket Issues Junction Table
+-- 1.5 Client Ticket Issues Junction Table
 CREATE TABLE IF NOT EXISTS client_ticket_issues (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ticket_id UUID NOT NULL REFERENCES client_tickets(id) ON DELETE CASCADE,
@@ -237,7 +93,7 @@ CREATE TABLE IF NOT EXISTS client_ticket_issues (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- 2.6 Evidence Documents Table
+-- 1.6 Evidence Documents Table
 CREATE TABLE IF NOT EXISTS evidence_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -262,7 +118,7 @@ CREATE TABLE IF NOT EXISTS evidence_documents (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- 2.7 Evidence Document Requests Table
+-- 1.7 Evidence Document Requests Table
 CREATE TABLE IF NOT EXISTS evidence_document_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -278,7 +134,7 @@ CREATE TABLE IF NOT EXISTS evidence_document_requests (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- 2.8 Document Remediations Table
+-- 1.8 Document Remediations Table
 CREATE TABLE IF NOT EXISTS document_remediations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -310,7 +166,7 @@ CREATE TABLE IF NOT EXISTS document_remediations (
     rejection_reason TEXT
 );
 
--- 2.9 Client Billing Addons Table
+-- 1.9 Client Billing Addons Table
 CREATE TABLE IF NOT EXISTS client_billing_addons (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -329,7 +185,7 @@ CREATE TABLE IF NOT EXISTS client_billing_addons (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- 2.10 Notifications Table (Client Portal)
+-- 1.10 Notifications Table (Client Portal)
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
@@ -353,7 +209,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- 2.11 Admin Notifications Table
+-- 1.11 Admin Notifications Table
 CREATE TABLE IF NOT EXISTS admin_notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(255) NOT NULL,
@@ -370,7 +226,7 @@ CREATE TABLE IF NOT EXISTS admin_notifications (
     read_at TIMESTAMP
 );
 
--- 2.12 Clerk User ID Backups Table
+-- 1.12 Clerk User ID Backups Table
 CREATE TABLE IF NOT EXISTS clerk_user_id_backups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_user_id UUID NOT NULL,
@@ -382,7 +238,7 @@ CREATE TABLE IF NOT EXISTS clerk_user_id_backups (
     notes TEXT
 );
 
--- 2.13 Ticket Messages Table
+-- 1.13 Ticket Messages Table
 CREATE TABLE IF NOT EXISTS ticket_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ticket_id UUID NOT NULL REFERENCES client_tickets(id) ON DELETE CASCADE,
@@ -398,7 +254,7 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
 );
 
 -- ============================================================================
--- SECTION 3: ADD MISSING COLUMNS TO EXISTING TABLES (4 columns)
+-- SECTION 2: ADD MISSING COLUMNS TO EXISTING TABLES
 -- ============================================================================
 
 -- Helper function
@@ -427,23 +283,17 @@ EXCEPTION WHEN others THEN
 END;
 $$ LANGUAGE plpgsql;
 
--- 3.1 clients.team_member_limit
+-- Add missing columns
 SELECT add_column_if_not_exists('clients', 'team_member_limit', 'INTEGER NOT NULL', '5');
-
--- 3.2 reports.is_public
 SELECT add_column_if_not_exists('reports', 'is_public', 'BOOLEAN NOT NULL', 'false');
-
--- 3.3 reports.public_token
 SELECT add_column_if_not_exists('reports', 'public_token', 'VARCHAR(64)', 'NULL');
-
--- 3.4 team_members.email_notifications
 SELECT add_column_if_not_exists('team_members', 'email_notifications', 'BOOLEAN NOT NULL', 'true');
 
 -- Cleanup helper function
 DROP FUNCTION IF EXISTS add_column_if_not_exists(TEXT, TEXT, TEXT, TEXT);
 
 -- ============================================================================
--- SECTION 4: CREATE INDEXES FOR NEW TABLES
+-- SECTION 3: CREATE INDEXES
 -- ============================================================================
 
 -- Client Users indexes
@@ -518,10 +368,9 @@ CREATE INDEX IF NOT EXISTS idx_ticket_messages_sender_id ON ticket_messages(send
 CREATE INDEX IF NOT EXISTS idx_ticket_messages_created_at ON ticket_messages(created_at DESC);
 
 -- ============================================================================
--- SECTION 5: ADD FOREIGN KEY CONSTRAINTS
+-- SECTION 4: ADD FOREIGN KEY CONSTRAINTS
 -- ============================================================================
 
--- Add FK constraints with safe handling
 DO $$ BEGIN
     ALTER TABLE client_team_members ADD CONSTRAINT fk_client_team_members_invited_by 
         FOREIGN KEY (invited_by_user_id) REFERENCES client_users(id) ON DELETE SET NULL;
@@ -598,10 +447,9 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ============================================================================
--- SECTION 6: UPDATE TRIGGERS
+-- SECTION 5: UPDATE TRIGGERS
 -- ============================================================================
 
--- Create/update function for updated_at trigger
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -610,7 +458,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Add triggers to new tables
 DO $$
 DECLARE
     t RECORD;
@@ -638,13 +485,12 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- SECTION 7: VERIFICATION
+-- VERIFICATION
 -- ============================================================================
 
 SELECT 'Migration Summary:' as info;
 SELECT 'Tables:' as metric, COUNT(*) as count FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
 SELECT 'Enums:' as metric, COUNT(*) as count FROM pg_type WHERE typtype = 'e' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
-SELECT 'Indexes:' as metric, COUNT(*) as count FROM pg_indexes WHERE schemaname = 'public';
 
 SELECT 'Migration to production schema complete!' as status;
 
