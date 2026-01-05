@@ -1034,6 +1034,20 @@ CREATE TABLE IF NOT EXISTS reports (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+-- Add columns if they don't exist (for existing tables that may be missing newer columns)
+DO $$ BEGIN
+    ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_month VARCHAR(20);
+EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN
+    ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_year INTEGER;
+EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN
+    ALTER TABLE reports ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE;
+EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN
+    ALTER TABLE reports ADD COLUMN IF NOT EXISTS public_token VARCHAR(64);
+EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
 -- Report indexes
 CREATE INDEX IF NOT EXISTS idx_reports_project_id ON reports(project_id);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
@@ -2276,3 +2290,4 @@ SELECT
 -- ============================================================================
 
 SELECT 'A3S Platform database setup complete!' as status;
+
