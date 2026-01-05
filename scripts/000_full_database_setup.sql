@@ -7,9 +7,7 @@
 --
 -- IDEMPOTENT: Safe to run multiple times - uses IF NOT EXISTS patterns
 -- 
--- ENUM HANDLING: 
---   - Creates enum if it doesn't exist
---   - Adds missing values to existing enums (won't break existing data)
+-- IMPORTANT: This script matches the PRODUCTION database exactly.
 --
 -- Usage:
 --   psql -d your_database -f 000_full_database_setup.sql
@@ -24,563 +22,17 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ============================================================================
--- SECTION 1: ENUM TYPES
+-- SECTION 1: ENUM TYPES (60 total)
 -- ============================================================================
--- 
--- Strategy: First try to create enum, then add any missing values
--- This ensures both fresh installs AND updates work correctly
---
--- Note: ALTER TYPE ... ADD VALUE cannot run inside a transaction block
--- in older PostgreSQL versions, so we use separate DO blocks
 
--- -----------------------------------------------------------------------------
--- Helper function to safely add enum values
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION add_enum_value_if_not_exists(
-    enum_type_name TEXT,
-    new_value TEXT
-) RETURNS VOID AS $$
-BEGIN
-    -- Check if the value already exists
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_enum 
-        WHERE enumtypid = enum_type_name::regtype 
-        AND enumlabel = new_value
-    ) THEN
-        EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS %L', enum_type_name, new_value);
-    END IF;
-EXCEPTION
-    WHEN others THEN
-        RAISE NOTICE 'Could not add value % to enum %: %', new_value, enum_type_name, SQLERRM;
-END;
-$$ LANGUAGE plpgsql;
-
--- -----------------------------------------------------------------------------
--- 1.1 Client & Organization Enums
--- -----------------------------------------------------------------------------
-
--- client_status
-DO $$ BEGIN
-    CREATE TYPE client_status AS ENUM ('pending');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'pending';
-ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'active';
-ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'inactive';
-ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'suspended';
-ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'archived';
-
--- client_type
-DO $$ BEGIN
-    CREATE TYPE client_type AS ENUM ('a3s');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE client_type ADD VALUE IF NOT EXISTS 'a3s';
-ALTER TYPE client_type ADD VALUE IF NOT EXISTS 'p15r';
-ALTER TYPE client_type ADD VALUE IF NOT EXISTS 'partner';
-
--- policy_status
-DO $$ BEGIN
-    CREATE TYPE policy_status AS ENUM ('none');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'none';
-ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'draft';
-ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'review';
-ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'approved';
-ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'has_policy';
-ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'needs_review';
-ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'needs_creation';
-ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'in_progress';
-ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'completed';
-
--- company_size
-DO $$ BEGIN
-    CREATE TYPE company_size AS ENUM ('1-10');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE company_size ADD VALUE IF NOT EXISTS '1-10';
-ALTER TYPE company_size ADD VALUE IF NOT EXISTS '11-50';
-ALTER TYPE company_size ADD VALUE IF NOT EXISTS '51-200';
-ALTER TYPE company_size ADD VALUE IF NOT EXISTS '201-1000';
-ALTER TYPE company_size ADD VALUE IF NOT EXISTS '1000+';
-
--- pricing_tier
-DO $$ BEGIN
-    CREATE TYPE pricing_tier AS ENUM ('basic');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'basic';
-ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'professional';
-ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'enterprise';
-ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'custom';
-
--- payment_method
-DO $$ BEGIN
-    CREATE TYPE payment_method AS ENUM ('credit_card');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'credit_card';
-ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'ach';
-ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'wire';
-ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'check';
-
--- communication_preference
-DO $$ BEGIN
-    CREATE TYPE communication_preference AS ENUM ('email');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'email';
-ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'phone';
-ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'slack';
-ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'teams';
-
--- timeline
-DO $$ BEGIN
-    CREATE TYPE timeline AS ENUM ('immediate');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE timeline ADD VALUE IF NOT EXISTS 'immediate';
-ALTER TYPE timeline ADD VALUE IF NOT EXISTS '1-3_months';
-ALTER TYPE timeline ADD VALUE IF NOT EXISTS '3-6_months';
-ALTER TYPE timeline ADD VALUE IF NOT EXISTS '6-12_months';
-ALTER TYPE timeline ADD VALUE IF NOT EXISTS 'ongoing';
-
--- accessibility_level
-DO $$ BEGIN
-    CREATE TYPE accessibility_level AS ENUM ('none');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Helper: Create enum if not exists, then add values
+DO $$ BEGIN CREATE TYPE accessibility_level AS ENUM ('none'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE accessibility_level ADD VALUE IF NOT EXISTS 'none';
 ALTER TYPE accessibility_level ADD VALUE IF NOT EXISTS 'basic';
 ALTER TYPE accessibility_level ADD VALUE IF NOT EXISTS 'partial';
 ALTER TYPE accessibility_level ADD VALUE IF NOT EXISTS 'compliant';
 
--- reporting_frequency
-DO $$ BEGIN
-    CREATE TYPE reporting_frequency AS ENUM ('weekly');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'weekly';
-ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'bi-weekly';
-ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'monthly';
-ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'quarterly';
-
--- billing_frequency
-DO $$ BEGIN
-    CREATE TYPE billing_frequency AS ENUM ('daily');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'daily';
-ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'weekly';
-ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'bi-weekly';
-ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'monthly';
-ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'quarterly';
-ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'half-yearly';
-ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'yearly';
-
--- -----------------------------------------------------------------------------
--- 1.2 Project Enums
--- -----------------------------------------------------------------------------
-
--- project_status
-DO $$ BEGIN
-    CREATE TYPE project_status AS ENUM ('planning');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'planning';
-ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'active';
-ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'on_hold';
-ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'completed';
-ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'cancelled';
-ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'archived';
-
--- project_priority
-DO $$ BEGIN
-    CREATE TYPE project_priority AS ENUM ('low');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'low';
-ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'medium';
-ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'high';
-ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'urgent';
-
--- project_type
-DO $$ BEGIN
-    CREATE TYPE project_type AS ENUM ('audit');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'audit';
-ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'remediation';
-ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'monitoring';
-ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'training';
-ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'consultation';
-ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'full_compliance';
-ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'a3s_program';
-
--- project_platform
-DO $$ BEGIN
-    CREATE TYPE project_platform AS ENUM ('website');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'website';
-ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'mobile_app';
-ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'desktop_app';
-ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'web_app';
-ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'api';
-ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'other';
-
--- tech_stack
-DO $$ BEGIN
-    CREATE TYPE tech_stack AS ENUM ('wordpress');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'wordpress';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'react';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'vue';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'angular';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'nextjs';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'nuxt';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'laravel';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'django';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'rails';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'nodejs';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'express';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'fastapi';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'spring';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'aspnet';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'flutter';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'react_native';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'ionic';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'xamarin';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'electron';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'tauri';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'wails';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'android_native';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'ios_native';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'unity';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'unreal';
-ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'other';
-
--- billing_type
-DO $$ BEGIN
-    CREATE TYPE billing_type AS ENUM ('fixed');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE billing_type ADD VALUE IF NOT EXISTS 'fixed';
-ALTER TYPE billing_type ADD VALUE IF NOT EXISTS 'hourly';
-ALTER TYPE billing_type ADD VALUE IF NOT EXISTS 'milestone';
-
--- project_wcag_level
-DO $$ BEGIN
-    CREATE TYPE project_wcag_level AS ENUM ('A');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE project_wcag_level ADD VALUE IF NOT EXISTS 'A';
-ALTER TYPE project_wcag_level ADD VALUE IF NOT EXISTS 'AA';
-ALTER TYPE project_wcag_level ADD VALUE IF NOT EXISTS 'AAA';
-
--- client_wcag_level
-DO $$ BEGIN
-    CREATE TYPE client_wcag_level AS ENUM ('A');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE client_wcag_level ADD VALUE IF NOT EXISTS 'A';
-ALTER TYPE client_wcag_level ADD VALUE IF NOT EXISTS 'AA';
-ALTER TYPE client_wcag_level ADD VALUE IF NOT EXISTS 'AAA';
-
--- -----------------------------------------------------------------------------
--- 1.3 WCAG & Accessibility Enums
--- -----------------------------------------------------------------------------
-
--- conformance_level
-DO $$ BEGIN
-    CREATE TYPE conformance_level AS ENUM ('A');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE conformance_level ADD VALUE IF NOT EXISTS 'A';
-ALTER TYPE conformance_level ADD VALUE IF NOT EXISTS 'AA';
-ALTER TYPE conformance_level ADD VALUE IF NOT EXISTS 'AAA';
-
--- severity
-DO $$ BEGIN
-    CREATE TYPE severity AS ENUM ('1_critical');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE severity ADD VALUE IF NOT EXISTS '1_critical';
-ALTER TYPE severity ADD VALUE IF NOT EXISTS '2_high';
-ALTER TYPE severity ADD VALUE IF NOT EXISTS '3_medium';
-ALTER TYPE severity ADD VALUE IF NOT EXISTS '4_low';
-
--- issue_type
-DO $$ BEGIN
-    CREATE TYPE issue_type AS ENUM ('automated_tools');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'automated_tools';
-ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'screen_reader';
-ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'keyboard_navigation';
-ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'color_contrast';
-ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'text_spacing';
-ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'browser_zoom';
-ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'other';
-
--- dev_status
-DO $$ BEGIN
-    CREATE TYPE dev_status AS ENUM ('not_started');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'not_started';
-ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'in_progress';
-ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'done';
-ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'blocked';
-ALTER TYPE dev_status ADD VALUE IF NOT EXISTS '3rd_party';
-ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'wont_fix';
-
--- qa_status
-DO $$ BEGIN
-    CREATE TYPE qa_status AS ENUM ('not_started');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'not_started';
-ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'in_progress';
-ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'fixed';
-ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'verified';
-ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'failed';
-ALTER TYPE qa_status ADD VALUE IF NOT EXISTS '3rd_party';
-
--- url_category
-DO $$ BEGIN
-    CREATE TYPE url_category AS ENUM ('home');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'home';
-ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'content';
-ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'form';
-ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'admin';
-ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'other';
-
--- -----------------------------------------------------------------------------
--- 1.4 Ticket Enums
--- -----------------------------------------------------------------------------
-
--- ticket_status
-DO $$ BEGIN
-    CREATE TYPE ticket_status AS ENUM ('open');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'open';
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'in_progress';
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'resolved';
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'closed';
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'needs_attention';
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'third_party';
-ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'fixed';
-
--- ticket_priority
-DO $$ BEGIN
-    CREATE TYPE ticket_priority AS ENUM ('low');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'low';
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'medium';
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'high';
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'critical';
-ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'urgent';
-
--- ticket_type
-DO $$ BEGIN
-    CREATE TYPE ticket_type AS ENUM ('bug');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'bug';
-ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'feature';
-ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'task';
-ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'accessibility';
-ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'improvement';
-
--- ticket_category
-DO $$ BEGIN
-    CREATE TYPE ticket_category AS ENUM ('technical');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'technical';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'billing';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'general';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'feature_request';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'bug_report';
-ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'other';
-
--- -----------------------------------------------------------------------------
--- 1.5 Report Enums
--- -----------------------------------------------------------------------------
-
--- report_type
-DO $$ BEGIN
-    CREATE TYPE report_type AS ENUM ('executive_summary');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'executive_summary';
-ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'technical_report';
-ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'compliance_report';
-ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'monthly_progress';
-ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'custom';
-
--- report_status
-DO $$ BEGIN
-    CREATE TYPE report_status AS ENUM ('draft');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'draft';
-ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'generated';
-ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'edited';
-ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'sent';
-ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'archived';
-
--- -----------------------------------------------------------------------------
--- 1.6 Team & User Enums
--- -----------------------------------------------------------------------------
-
--- team_type
-DO $$ BEGIN
-    CREATE TYPE team_type AS ENUM ('internal');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE team_type ADD VALUE IF NOT EXISTS 'internal';
-ALTER TYPE team_type ADD VALUE IF NOT EXISTS 'external';
-
--- employee_role
-DO $$ BEGIN
-    CREATE TYPE employee_role AS ENUM ('ceo');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'ceo';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'manager';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'team_lead';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'senior_developer';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'developer';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'junior_developer';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'designer';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'qa_engineer';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'project_manager';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'business_analyst';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'consultant';
-ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'contractor';
-
--- employment_status
-DO $$ BEGIN
-    CREATE TYPE employment_status AS ENUM ('active');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'active';
-ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'inactive';
-ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'on_leave';
-ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'terminated';
-
--- developer_role
-DO $$ BEGIN
-    CREATE TYPE developer_role AS ENUM ('project_lead');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'project_lead';
-ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'senior_developer';
-ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'developer';
-ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'qa_engineer';
-ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'accessibility_specialist';
-
--- user_role
-DO $$ BEGIN
-    CREATE TYPE user_role AS ENUM ('viewer');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'viewer';
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'editor';
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'admin';
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'owner';
-
--- project_role
-DO $$ BEGIN
-    CREATE TYPE project_role AS ENUM ('project_admin');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE project_role ADD VALUE IF NOT EXISTS 'project_admin';
-ALTER TYPE project_role ADD VALUE IF NOT EXISTS 'project_member';
-
--- invitation_status
-DO $$ BEGIN
-    CREATE TYPE invitation_status AS ENUM ('pending');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'pending';
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'sent';
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'accepted';
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'expired';
-ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'cancelled';
-
--- -----------------------------------------------------------------------------
--- 1.7 Document Enums
--- -----------------------------------------------------------------------------
-
--- document_type
-DO $$ BEGIN
-    CREATE TYPE document_type AS ENUM ('audit_report');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'audit_report';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'remediation_plan';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'test_results';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'compliance_certificate';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'meeting_notes';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'vpat';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'accessibility_summary';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'legal_response';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'monthly_monitoring';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'custom';
-ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'other';
-
--- document_status
-DO $$ BEGIN
-    CREATE TYPE document_status AS ENUM ('draft');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'draft';
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'pending_review';
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'certified';
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'active';
-ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'archived';
-
--- document_request_status
-DO $$ BEGIN
-    CREATE TYPE document_request_status AS ENUM ('pending');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'pending';
-ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'in_progress';
-ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'completed';
-ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'rejected';
-
--- document_priority
-DO $$ BEGIN
-    CREATE TYPE document_priority AS ENUM ('low');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'low';
-ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'medium';
-ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'high';
-ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'critical';
-
--- remediation_type
-DO $$ BEGIN
-    CREATE TYPE remediation_type AS ENUM ('traditional_pdf');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE remediation_type ADD VALUE IF NOT EXISTS 'traditional_pdf';
-ALTER TYPE remediation_type ADD VALUE IF NOT EXISTS 'html_alternative';
-
--- remediation_status
-DO $$ BEGIN
-    CREATE TYPE remediation_status AS ENUM ('pending_review');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'pending_review';
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'approved';
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'in_progress';
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'completed';
-ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'rejected';
-
--- -----------------------------------------------------------------------------
--- 1.8 Notification Enums
--- -----------------------------------------------------------------------------
-
--- notification_type
-DO $$ BEGIN
-    CREATE TYPE notification_type AS ENUM ('system');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'system';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'project_update';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_ready';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_approved';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_rejected';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'report_ready';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'team_invite';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'ticket_update';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'evidence_update';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'billing';
-ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'reminder';
-
--- notification_priority
-DO $$ BEGIN
-    CREATE TYPE notification_priority AS ENUM ('low');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'low';
-ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'normal';
-ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'high';
-ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'urgent';
-
--- -----------------------------------------------------------------------------
--- 1.9 Other Enums
--- -----------------------------------------------------------------------------
-
--- activity_action
-DO $$ BEGIN
-    CREATE TYPE activity_action AS ENUM ('created');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE activity_action AS ENUM ('created'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'created';
 ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'updated';
 ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'milestone_completed';
@@ -590,30 +42,89 @@ ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'document_uploaded';
 ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'time_logged';
 ALTER TYPE activity_action ADD VALUE IF NOT EXISTS 'staging_credentials_updated';
 
--- milestone_status
-DO $$ BEGIN
-    CREATE TYPE milestone_status AS ENUM ('pending');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'pending';
-ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'in_progress';
-ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'completed';
-ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'overdue';
+DO $$ BEGIN CREATE TYPE admin_notification_type AS ENUM ('system'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'system';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_ticket';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_remediation_request';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_document_request';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'client_signup';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'custom';
 
--- time_entry_category
-DO $$ BEGIN
-    CREATE TYPE time_entry_category AS ENUM ('development');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'development';
-ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'testing';
-ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'review';
-ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'meeting';
-ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'documentation';
-ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'research';
+DO $$ BEGIN CREATE TYPE author_role AS ENUM ('developer'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'developer';
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'qa_tester';
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'accessibility_expert';
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'project_manager';
+ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'client';
 
--- credential_type
-DO $$ BEGIN
-    CREATE TYPE credential_type AS ENUM ('staging');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE billing_addon_status AS ENUM ('active'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'cancelled';
+ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'pending';
+
+DO $$ BEGIN CREATE TYPE billing_addon_type AS ENUM ('team_members'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'team_members';
+ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'document_remediation';
+ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'evidence_locker';
+ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'custom';
+
+DO $$ BEGIN CREATE TYPE billing_frequency AS ENUM ('monthly'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'daily';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'weekly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'bi-weekly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'monthly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'quarterly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'half-yearly';
+ALTER TYPE billing_frequency ADD VALUE IF NOT EXISTS 'yearly';
+
+DO $$ BEGIN CREATE TYPE billing_type AS ENUM ('fixed'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE billing_type ADD VALUE IF NOT EXISTS 'fixed';
+ALTER TYPE billing_type ADD VALUE IF NOT EXISTS 'hourly';
+ALTER TYPE billing_type ADD VALUE IF NOT EXISTS 'milestone';
+
+DO $$ BEGIN CREATE TYPE client_status AS ENUM ('pending'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'inactive';
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'suspended';
+ALTER TYPE client_status ADD VALUE IF NOT EXISTS 'archived';
+
+DO $$ BEGIN CREATE TYPE client_type AS ENUM ('a3s'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE client_type ADD VALUE IF NOT EXISTS 'a3s';
+ALTER TYPE client_type ADD VALUE IF NOT EXISTS 'p15r';
+ALTER TYPE client_type ADD VALUE IF NOT EXISTS 'partner';
+
+DO $$ BEGIN CREATE TYPE client_wcag_level AS ENUM ('A'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE client_wcag_level ADD VALUE IF NOT EXISTS 'A';
+ALTER TYPE client_wcag_level ADD VALUE IF NOT EXISTS 'AA';
+ALTER TYPE client_wcag_level ADD VALUE IF NOT EXISTS 'AAA';
+
+DO $$ BEGIN CREATE TYPE comment_type AS ENUM ('general'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'general';
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'dev_update';
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'qa_feedback';
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'technical_note';
+ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'resolution';
+
+DO $$ BEGIN CREATE TYPE communication_preference AS ENUM ('email'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'email';
+ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'phone';
+ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'slack';
+ALTER TYPE communication_preference ADD VALUE IF NOT EXISTS 'teams';
+
+DO $$ BEGIN CREATE TYPE company_size AS ENUM ('1-10'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '1-10';
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '11-50';
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '51-200';
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '201-1000';
+ALTER TYPE company_size ADD VALUE IF NOT EXISTS '1000+';
+
+DO $$ BEGIN CREATE TYPE conformance_level AS ENUM ('A'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE conformance_level ADD VALUE IF NOT EXISTS 'A';
+ALTER TYPE conformance_level ADD VALUE IF NOT EXISTS 'AA';
+ALTER TYPE conformance_level ADD VALUE IF NOT EXISTS 'AAA';
+
+DO $$ BEGIN CREATE TYPE credential_type AS ENUM ('staging'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'staging';
 ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'production';
 ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'development';
@@ -646,62 +157,7 @@ ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'analytics';
 ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'monitoring';
 ALTER TYPE credential_type ADD VALUE IF NOT EXISTS 'other';
 
--- comment_type
-DO $$ BEGIN
-    CREATE TYPE comment_type AS ENUM ('general');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'general';
-ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'dev_update';
-ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'qa_feedback';
-ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'technical_note';
-ALTER TYPE comment_type ADD VALUE IF NOT EXISTS 'resolution';
-
--- author_role
-DO $$ BEGIN
-    CREATE TYPE author_role AS ENUM ('developer');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'developer';
-ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'qa_tester';
-ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'accessibility_expert';
-ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'project_manager';
-ALTER TYPE author_role ADD VALUE IF NOT EXISTS 'client';
-
--- billing_addon_type
-DO $$ BEGIN
-    CREATE TYPE billing_addon_type AS ENUM ('team_members');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'team_members';
-ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'document_remediation';
-ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'evidence_locker';
-ALTER TYPE billing_addon_type ADD VALUE IF NOT EXISTS 'custom';
-
--- billing_addon_status
-DO $$ BEGIN
-    CREATE TYPE billing_addon_status AS ENUM ('active');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'active';
-ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'cancelled';
-ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'pending';
-
--- -----------------------------------------------------------------------------
--- 1.10 MISSING ENUMS (Added for 100% DB compatibility)
--- -----------------------------------------------------------------------------
-
--- admin_notification_type (for admin panel notifications)
-DO $$ BEGIN
-    CREATE TYPE admin_notification_type AS ENUM ('system');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'system';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_ticket';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_remediation_request';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_document_request';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'client_signup';
-ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'custom';
-
--- department (for team organization)
-DO $$ BEGIN
-    CREATE TYPE department AS ENUM ('executive');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE department AS ENUM ('executive'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE department ADD VALUE IF NOT EXISTS 'executive';
 ALTER TYPE department ADD VALUE IF NOT EXISTS 'development';
 ALTER TYPE department ADD VALUE IF NOT EXISTS 'design';
@@ -711,10 +167,90 @@ ALTER TYPE department ADD VALUE IF NOT EXISTS 'accessibility';
 ALTER TYPE department ADD VALUE IF NOT EXISTS 'consulting';
 ALTER TYPE department ADD VALUE IF NOT EXISTS 'operations';
 
--- member_role (for team members)
-DO $$ BEGIN
-    CREATE TYPE member_role AS ENUM ('developer');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE dev_status AS ENUM ('not_started'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'not_started';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'done';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'blocked';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS '3rd_party';
+ALTER TYPE dev_status ADD VALUE IF NOT EXISTS 'wont_fix';
+
+DO $$ BEGIN CREATE TYPE developer_role AS ENUM ('developer'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'project_lead';
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'senior_developer';
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'developer';
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'qa_engineer';
+ALTER TYPE developer_role ADD VALUE IF NOT EXISTS 'accessibility_specialist';
+
+DO $$ BEGIN CREATE TYPE document_priority AS ENUM ('medium'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'low';
+ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'medium';
+ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'high';
+ALTER TYPE document_priority ADD VALUE IF NOT EXISTS 'critical';
+
+DO $$ BEGIN CREATE TYPE document_request_status AS ENUM ('pending'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE document_request_status ADD VALUE IF NOT EXISTS 'rejected';
+
+DO $$ BEGIN CREATE TYPE document_status AS ENUM ('draft'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'draft';
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'pending_review';
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'certified';
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE document_status ADD VALUE IF NOT EXISTS 'archived';
+
+DO $$ BEGIN CREATE TYPE document_type AS ENUM ('other'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'audit_report';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'remediation_plan';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'test_results';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'compliance_certificate';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'meeting_notes';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'vpat';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'accessibility_summary';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'legal_response';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'monthly_monitoring';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'custom';
+ALTER TYPE document_type ADD VALUE IF NOT EXISTS 'other';
+
+DO $$ BEGIN CREATE TYPE employee_role AS ENUM ('developer'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'ceo';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'manager';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'team_lead';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'senior_developer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'developer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'junior_developer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'designer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'qa_engineer';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'project_manager';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'business_analyst';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'consultant';
+ALTER TYPE employee_role ADD VALUE IF NOT EXISTS 'contractor';
+
+DO $$ BEGIN CREATE TYPE employment_status AS ENUM ('active'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'inactive';
+ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'on_leave';
+ALTER TYPE employment_status ADD VALUE IF NOT EXISTS 'terminated';
+
+DO $$ BEGIN CREATE TYPE invitation_status AS ENUM ('pending'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'sent';
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'accepted';
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'expired';
+ALTER TYPE invitation_status ADD VALUE IF NOT EXISTS 'cancelled';
+
+DO $$ BEGIN CREATE TYPE issue_type AS ENUM ('other'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'automated_tools';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'screen_reader';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'keyboard_navigation';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'color_contrast';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'text_spacing';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'browser_zoom';
+ALTER TYPE issue_type ADD VALUE IF NOT EXISTS 'other';
+
+DO $$ BEGIN CREATE TYPE member_role AS ENUM ('developer'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'developer';
 ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'ceo';
 ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'team_lead';
@@ -726,38 +262,251 @@ ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'accessibility_specialist';
 ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'consultant';
 ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'intern';
 
--- member_status (for team members)
-DO $$ BEGIN
-    CREATE TYPE member_status AS ENUM ('active');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE member_status AS ENUM ('active'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'active';
 ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'inactive';
 ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'on_leave';
 ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'terminated';
 
--- message_sender_type (for ticket messages)
-DO $$ BEGIN
-    CREATE TYPE message_sender_type AS ENUM ('admin');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE message_sender_type AS ENUM ('admin'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE message_sender_type ADD VALUE IF NOT EXISTS 'admin';
 ALTER TYPE message_sender_type ADD VALUE IF NOT EXISTS 'client';
 
--- team_status (for teams)
-DO $$ BEGIN
-    CREATE TYPE team_status AS ENUM ('active');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE milestone_status AS ENUM ('pending'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS 'overdue';
+
+DO $$ BEGIN CREATE TYPE notification_priority AS ENUM ('normal'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'low';
+ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'normal';
+ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'high';
+ALTER TYPE notification_priority ADD VALUE IF NOT EXISTS 'urgent';
+
+DO $$ BEGIN CREATE TYPE notification_type AS ENUM ('system'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'system';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'project_update';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_ready';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_approved';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'document_rejected';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'report_ready';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'team_invite';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'ticket_update';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'evidence_update';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'billing';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'reminder';
+
+DO $$ BEGIN CREATE TYPE payment_method AS ENUM ('credit_card'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'credit_card';
+ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'ach';
+ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'wire';
+ALTER TYPE payment_method ADD VALUE IF NOT EXISTS 'check';
+
+DO $$ BEGIN CREATE TYPE policy_status AS ENUM ('none'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'none';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'draft';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'review';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'approved';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'has_policy';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'needs_review';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'needs_creation';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE policy_status ADD VALUE IF NOT EXISTS 'completed';
+
+DO $$ BEGIN CREATE TYPE pricing_tier AS ENUM ('basic'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'basic';
+ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'professional';
+ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'enterprise';
+ALTER TYPE pricing_tier ADD VALUE IF NOT EXISTS 'custom';
+
+DO $$ BEGIN CREATE TYPE project_platform AS ENUM ('website'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'website';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'mobile_app';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'desktop_app';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'web_app';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'api';
+ALTER TYPE project_platform ADD VALUE IF NOT EXISTS 'other';
+
+DO $$ BEGIN CREATE TYPE project_priority AS ENUM ('medium'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'low';
+ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'medium';
+ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'high';
+ALTER TYPE project_priority ADD VALUE IF NOT EXISTS 'urgent';
+
+DO $$ BEGIN CREATE TYPE project_role AS ENUM ('project_member'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_role ADD VALUE IF NOT EXISTS 'project_admin';
+ALTER TYPE project_role ADD VALUE IF NOT EXISTS 'project_member';
+
+DO $$ BEGIN CREATE TYPE project_status AS ENUM ('planning'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'planning';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'on_hold';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'cancelled';
+ALTER TYPE project_status ADD VALUE IF NOT EXISTS 'archived';
+
+DO $$ BEGIN CREATE TYPE project_type AS ENUM ('audit'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'audit';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'remediation';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'monitoring';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'training';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'consultation';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'full_compliance';
+ALTER TYPE project_type ADD VALUE IF NOT EXISTS 'a3s_program';
+
+DO $$ BEGIN CREATE TYPE project_wcag_level AS ENUM ('AA'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE project_wcag_level ADD VALUE IF NOT EXISTS 'A';
+ALTER TYPE project_wcag_level ADD VALUE IF NOT EXISTS 'AA';
+ALTER TYPE project_wcag_level ADD VALUE IF NOT EXISTS 'AAA';
+
+DO $$ BEGIN CREATE TYPE qa_status AS ENUM ('not_started'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'not_started';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'fixed';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'verified';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS 'failed';
+ALTER TYPE qa_status ADD VALUE IF NOT EXISTS '3rd_party';
+
+DO $$ BEGIN CREATE TYPE remediation_status AS ENUM ('pending'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'pending_review';
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'approved';
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE remediation_status ADD VALUE IF NOT EXISTS 'rejected';
+
+DO $$ BEGIN CREATE TYPE remediation_type AS ENUM ('traditional_pdf'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE remediation_type ADD VALUE IF NOT EXISTS 'traditional_pdf';
+ALTER TYPE remediation_type ADD VALUE IF NOT EXISTS 'html_alternative';
+
+DO $$ BEGIN CREATE TYPE report_status AS ENUM ('draft'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'draft';
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'generated';
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'edited';
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'sent';
+ALTER TYPE report_status ADD VALUE IF NOT EXISTS 'archived';
+
+DO $$ BEGIN CREATE TYPE report_type AS ENUM ('custom'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'executive_summary';
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'technical_report';
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'compliance_report';
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'monthly_progress';
+ALTER TYPE report_type ADD VALUE IF NOT EXISTS 'custom';
+
+DO $$ BEGIN CREATE TYPE reporting_frequency AS ENUM ('monthly'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'weekly';
+ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'bi-weekly';
+ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'monthly';
+ALTER TYPE reporting_frequency ADD VALUE IF NOT EXISTS 'quarterly';
+
+DO $$ BEGIN CREATE TYPE severity AS ENUM ('4_low'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE severity ADD VALUE IF NOT EXISTS '1_critical';
+ALTER TYPE severity ADD VALUE IF NOT EXISTS '2_high';
+ALTER TYPE severity ADD VALUE IF NOT EXISTS '3_medium';
+ALTER TYPE severity ADD VALUE IF NOT EXISTS '4_low';
+
+DO $$ BEGIN CREATE TYPE team_status AS ENUM ('active'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TYPE team_status ADD VALUE IF NOT EXISTS 'active';
 ALTER TYPE team_status ADD VALUE IF NOT EXISTS 'inactive';
 ALTER TYPE team_status ADD VALUE IF NOT EXISTS 'archived';
 
+DO $$ BEGIN CREATE TYPE team_type AS ENUM ('internal'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE team_type ADD VALUE IF NOT EXISTS 'internal';
+ALTER TYPE team_type ADD VALUE IF NOT EXISTS 'external';
+
+DO $$ BEGIN CREATE TYPE tech_stack AS ENUM ('other'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'wordpress';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'react';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'vue';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'angular';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'nextjs';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'nuxt';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'laravel';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'django';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'rails';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'nodejs';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'express';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'fastapi';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'spring';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'aspnet';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'flutter';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'react_native';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'ionic';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'xamarin';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'electron';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'tauri';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'wails';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'android_native';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'ios_native';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'unity';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'unreal';
+ALTER TYPE tech_stack ADD VALUE IF NOT EXISTS 'other';
+
+DO $$ BEGIN CREATE TYPE ticket_category AS ENUM ('general'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'technical';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'billing';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'general';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'feature_request';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'bug_report';
+ALTER TYPE ticket_category ADD VALUE IF NOT EXISTS 'other';
+
+DO $$ BEGIN CREATE TYPE ticket_priority AS ENUM ('medium'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'low';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'medium';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'high';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'critical';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'urgent';
+
+DO $$ BEGIN CREATE TYPE ticket_status AS ENUM ('open'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'open';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'in_progress';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'resolved';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'closed';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'needs_attention';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'third_party';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'fixed';
+
+DO $$ BEGIN CREATE TYPE ticket_type AS ENUM ('task'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'bug';
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'feature';
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'task';
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'accessibility';
+ALTER TYPE ticket_type ADD VALUE IF NOT EXISTS 'improvement';
+
+DO $$ BEGIN CREATE TYPE time_entry_category AS ENUM ('development'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'development';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'testing';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'review';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'meeting';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'documentation';
+ALTER TYPE time_entry_category ADD VALUE IF NOT EXISTS 'research';
+
+DO $$ BEGIN CREATE TYPE timeline AS ENUM ('ongoing'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS 'immediate';
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS '1-3_months';
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS '3-6_months';
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS '6-12_months';
+ALTER TYPE timeline ADD VALUE IF NOT EXISTS 'ongoing';
+
+DO $$ BEGIN CREATE TYPE url_category AS ENUM ('content'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'home';
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'content';
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'form';
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'admin';
+ALTER TYPE url_category ADD VALUE IF NOT EXISTS 'other';
+
+DO $$ BEGIN CREATE TYPE user_role AS ENUM ('viewer'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'viewer';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'editor';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'admin';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'owner';
+
 -- ============================================================================
--- SECTION 2: CORE TABLES (SHARED BY ADMIN & PORTAL)
+-- SECTION 2: TABLES (Matching Production Exactly)
 -- ============================================================================
 
--- -----------------------------------------------------------------------------
 -- 2.1 Clients Table
--- -----------------------------------------------------------------------------
-
 CREATE TABLE IF NOT EXISTS clients (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
@@ -765,11 +514,10 @@ CREATE TABLE IF NOT EXISTS clients (
     company VARCHAR(255) NOT NULL,
     phone VARCHAR(50),
     address TEXT,
-    billing_amount NUMERIC(10, 2) NOT NULL,
-    billing_start_date TIMESTAMP NOT NULL,
-    billing_frequency billing_frequency NOT NULL,
+    billing_amount NUMERIC(10,2),
+    billing_start_date TIMESTAMP,
+    billing_frequency billing_frequency,
     status client_status NOT NULL DEFAULT 'pending',
-    client_type client_type NOT NULL DEFAULT 'a3s',
     company_size company_size,
     industry VARCHAR(100),
     website VARCHAR(500),
@@ -785,61 +533,58 @@ CREATE TABLE IF NOT EXISTS clients (
     reporting_frequency reporting_frequency,
     point_of_contact VARCHAR(255),
     time_zone VARCHAR(100),
-    has_accessibility_policy BOOLEAN NOT NULL DEFAULT FALSE,
+    has_accessibility_policy BOOLEAN DEFAULT false,
     accessibility_policy_url VARCHAR(500),
+    requires_legal_documentation BOOLEAN DEFAULT false,
+    compliance_documents TEXT[],
+    existing_audits BOOLEAN DEFAULT false,
+    previous_audit_results TEXT,
+    notes TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    client_type client_type NOT NULL DEFAULT 'a3s',
     policy_status policy_status NOT NULL DEFAULT 'none',
     policy_notes TEXT,
-    notes TEXT,
     client_documents TEXT,
-    team_member_limit INTEGER NOT NULL DEFAULT 5,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    team_member_limit INTEGER NOT NULL DEFAULT 5
 );
 
--- Client indexes
-CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status);
-CREATE INDEX IF NOT EXISTS idx_clients_type ON clients(client_type);
-CREATE INDEX IF NOT EXISTS idx_clients_type_count ON clients(client_type);
-CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email);
-CREATE INDEX IF NOT EXISTS clients_status_idx ON clients(status);
-CREATE INDEX IF NOT EXISTS clients_client_type_idx ON clients(client_type);
-CREATE INDEX IF NOT EXISTS clients_company_idx ON clients(company);
-CREATE INDEX IF NOT EXISTS clients_created_at_idx ON clients(created_at);
-CREATE INDEX IF NOT EXISTS clients_policy_status_idx ON clients(policy_status);
-
--- -----------------------------------------------------------------------------
--- 2.2 Projects Table
--- -----------------------------------------------------------------------------
-
+-- 2.2 Projects Table  
 CREATE TABLE IF NOT EXISTS projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
     sheet_id VARCHAR(255),
-    status VARCHAR(50) DEFAULT 'planning',
-    priority VARCHAR(50) DEFAULT 'medium',
-    wcag_level VARCHAR(50) DEFAULT 'AA',
-    project_type VARCHAR(50),
-    project_platform VARCHAR(50) NOT NULL DEFAULT 'website',
-    tech_stack VARCHAR(50) NOT NULL DEFAULT 'other',
+    status VARCHAR(50) NOT NULL DEFAULT 'planning',
+    priority VARCHAR(50) NOT NULL DEFAULT 'medium',
+    wcag_level VARCHAR(50) NOT NULL DEFAULT 'AA',
+    project_type VARCHAR(50) NOT NULL,
     compliance_requirements TEXT[] NOT NULL DEFAULT '{}',
-    website_url VARCHAR(500),
-    testing_methodology TEXT[] NOT NULL DEFAULT '{}',
-    testing_schedule TEXT,
-    bug_severity_workflow TEXT,
     start_date TIMESTAMP,
     end_date TIMESTAMP,
-    estimated_hours NUMERIC(8, 2),
-    actual_hours NUMERIC(8, 2) DEFAULT 0,
-    budget NUMERIC(12, 2),
+    estimated_hours NUMERIC(8,2),
+    actual_hours NUMERIC(8,2) DEFAULT 0,
+    budget NUMERIC(12,2),
     billing_type VARCHAR(50) NOT NULL DEFAULT 'fixed',
-    hourly_rate NUMERIC(8, 2),
+    hourly_rate NUMERIC(8,2),
     progress_percentage INTEGER NOT NULL DEFAULT 0,
     milestones_completed INTEGER NOT NULL DEFAULT 0,
     total_milestones INTEGER NOT NULL DEFAULT 0,
     deliverables TEXT[] NOT NULL DEFAULT '{}',
     acceptance_criteria TEXT[] NOT NULL DEFAULT '{}',
+    tags TEXT[] NOT NULL DEFAULT '{}',
+    notes TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_by VARCHAR(255) NOT NULL,
+    last_modified_by VARCHAR(255) NOT NULL,
+    project_platform VARCHAR(50) NOT NULL DEFAULT 'website',
+    tech_stack VARCHAR(50) NOT NULL DEFAULT 'other',
+    website_url VARCHAR(500),
+    testing_methodology TEXT[] NOT NULL DEFAULT '{}',
+    testing_schedule TEXT,
+    bug_severity_workflow TEXT,
     default_testing_month VARCHAR(20),
     default_testing_year INTEGER,
     critical_issue_sla_days INTEGER DEFAULT 45,
@@ -847,49 +592,10 @@ CREATE TABLE IF NOT EXISTS projects (
     sync_status_summary JSONB DEFAULT '{}',
     last_sync_details JSONB DEFAULT '{}',
     credentials JSONB DEFAULT '[]',
-    credentials_backup JSONB,
-    tags TEXT[] NOT NULL DEFAULT '{}',
-    notes TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    created_by VARCHAR(255) NOT NULL,
-    last_modified_by VARCHAR(255) NOT NULL
+    credentials_backup JSONB
 );
 
--- Add constraints if they don't exist
-DO $$ BEGIN
-    ALTER TABLE projects ADD CONSTRAINT check_critical_sla_days 
-        CHECK (critical_issue_sla_days >= 1 AND critical_issue_sla_days <= 365);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    ALTER TABLE projects ADD CONSTRAINT check_high_sla_days 
-        CHECK (high_issue_sla_days >= 1 AND high_issue_sla_days <= 365);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
--- Project indexes
-CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
-CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
-CREATE INDEX IF NOT EXISTS idx_projects_sheet_id ON projects(sheet_id);
-CREATE INDEX IF NOT EXISTS idx_projects_type ON projects(project_type);
-CREATE INDEX IF NOT EXISTS idx_projects_wcag_level ON projects(wcag_level);
-CREATE INDEX IF NOT EXISTS idx_projects_created_at ON projects(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_projects_status_type ON projects(status, project_type);
-CREATE INDEX IF NOT EXISTS idx_projects_status_type_updated ON projects(status, project_type, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_projects_critical_sla ON projects(critical_issue_sla_days);
-CREATE INDEX IF NOT EXISTS idx_projects_high_sla ON projects(high_issue_sla_days);
-CREATE INDEX IF NOT EXISTS idx_projects_complex ON projects(status, project_type, client_id);
-CREATE INDEX IF NOT EXISTS projects_client_idx ON projects(client_id);
-CREATE INDEX IF NOT EXISTS projects_status_idx ON projects(status);
-CREATE INDEX IF NOT EXISTS projects_type_idx ON projects(project_type);
-CREATE INDEX IF NOT EXISTS projects_wcag_level_idx ON projects(wcag_level);
-CREATE INDEX IF NOT EXISTS projects_created_at_idx ON projects(created_at);
-CREATE INDEX IF NOT EXISTS projects_credentials_idx ON projects USING GIN (credentials);
-
--- -----------------------------------------------------------------------------
 -- 2.3 Test URLs Table
--- -----------------------------------------------------------------------------
-
 CREATE TABLE IF NOT EXISTS test_urls (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -898,10 +604,10 @@ CREATE TABLE IF NOT EXISTS test_urls (
     url_category url_category DEFAULT 'content',
     testing_month VARCHAR(20),
     testing_year INTEGER,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     remediation_month VARCHAR(20),
-    remediation_year INTEGER,
-    is_active BOOLEAN DEFAULT TRUE,
-    status TEXT,
     automated_tools TEXT,
     nvda_chrome TEXT,
     voiceover_iphone_safari TEXT,
@@ -909,45 +615,35 @@ CREATE TABLE IF NOT EXISTS test_urls (
     browser_zoom TEXT,
     keyboard_only TEXT,
     text_spacing TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    status TEXT,
+    remediation_year INTEGER
 );
 
--- Test URLs indexes
-CREATE UNIQUE INDEX IF NOT EXISTS test_urls_project_url_idx ON test_urls(project_id, url);
-CREATE INDEX IF NOT EXISTS idx_test_urls_project_id ON test_urls(project_id);
-CREATE INDEX IF NOT EXISTS idx_test_urls_status ON test_urls(status);
-CREATE INDEX IF NOT EXISTS idx_test_urls_remediation_year ON test_urls(remediation_year);
-
--- -----------------------------------------------------------------------------
 -- 2.4 Accessibility Issues Table (CRITICAL TABLE)
--- -----------------------------------------------------------------------------
-
 CREATE TABLE IF NOT EXISTS accessibility_issues (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    issue_id TEXT NOT NULL,
     url_id UUID NOT NULL REFERENCES test_urls(id) ON DELETE CASCADE,
     issue_title VARCHAR(500) NOT NULL,
     issue_description TEXT,
-    issue_type VARCHAR(50) NOT NULL,
-    severity VARCHAR(50) NOT NULL,
+    issue_type issue_type NOT NULL,
+    severity severity NOT NULL,
     testing_month VARCHAR(20),
     testing_year INTEGER,
     testing_environment VARCHAR(200),
     browser VARCHAR(100),
     operating_system VARCHAR(100),
     assistive_technology VARCHAR(100),
-    expected_result TEXT NOT NULL,
+    expected_result TEXT,
     actual_result TEXT,
     failed_wcag_criteria TEXT[] DEFAULT '{}',
     conformance_level conformance_level,
     screencast_url VARCHAR(1000),
     screenshot_urls TEXT[] DEFAULT '{}',
-    dev_status VARCHAR(50) DEFAULT 'not_started',
+    dev_status TEXT DEFAULT 'not_started',
     dev_comments TEXT,
     dev_assigned_to VARCHAR(255),
-    qa_status VARCHAR(50) DEFAULT 'not_started',
+    qa_status TEXT DEFAULT 'not_started',
     qa_comments TEXT,
     qa_assigned_to VARCHAR(255),
     discovered_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -956,69 +652,33 @@ CREATE TABLE IF NOT EXISTS accessibility_issues (
     qa_started_at TIMESTAMP,
     qa_completed_at TIMESTAMP,
     resolved_at TIMESTAMP,
-    is_active BOOLEAN DEFAULT TRUE,
-    is_duplicate BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT true,
+    is_duplicate BOOLEAN DEFAULT false,
     duplicate_of_id UUID,
     external_ticket_id VARCHAR(255),
     external_ticket_url VARCHAR(1000),
     import_batch_id VARCHAR(255),
     source_file_name VARCHAR(255),
-    -- CRITICAL: Controls client visibility
-    sent_to_user BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    sent_to_user BOOLEAN DEFAULT false,
     sent_date TIMESTAMP,
     sent_month VARCHAR(20),
     report_id UUID,
-    metadata JSONB,
     dev_status_updated_at TIMESTAMP,
     qa_status_updated_at TIMESTAMP,
+    metadata JSONB,
     sheet_name TEXT,
     sheet_row_number INTEGER,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    issue_id TEXT NOT NULL
 );
 
--- Accessibility Issues indexes (MOST QUERIED TABLE - comprehensive indexing)
--- Note: unique_project_issue_id is created as a UNIQUE INDEX below (handles both constraint and index cases)
--- Note: accessibility_issues_project_url_title_unique removed - production data has duplicates
-CREATE INDEX IF NOT EXISTS idx_accessibility_issues_issue_id ON accessibility_issues(issue_id);
-CREATE INDEX IF NOT EXISTS accessibility_issues_project_url_idx ON accessibility_issues(project_id, url_id);
-CREATE INDEX IF NOT EXISTS accessibility_issues_dev_status_idx ON accessibility_issues(dev_status);
-CREATE INDEX IF NOT EXISTS accessibility_issues_qa_status_idx ON accessibility_issues(qa_status);
-CREATE INDEX IF NOT EXISTS accessibility_issues_severity_idx ON accessibility_issues(severity);
-CREATE INDEX IF NOT EXISTS accessibility_issues_type_idx ON accessibility_issues(issue_type);
-CREATE INDEX IF NOT EXISTS accessibility_issues_sent_to_user_idx ON accessibility_issues(sent_to_user);
-CREATE INDEX IF NOT EXISTS accessibility_issues_report_id_idx ON accessibility_issues(report_id);
-CREATE INDEX IF NOT EXISTS accessibility_issues_duplicate_of_idx ON accessibility_issues(duplicate_of_id);
-CREATE INDEX IF NOT EXISTS accessibility_issues_import_batch_idx ON accessibility_issues(import_batch_id);
-CREATE INDEX IF NOT EXISTS idx_issues_project_id ON accessibility_issues(project_id);
-CREATE INDEX IF NOT EXISTS idx_issues_created_at ON accessibility_issues(created_at);
-CREATE INDEX IF NOT EXISTS idx_issues_updated_at ON accessibility_issues(updated_at);
-CREATE INDEX IF NOT EXISTS idx_issues_severity ON accessibility_issues(severity);
-CREATE INDEX IF NOT EXISTS idx_issues_dev_status ON accessibility_issues(dev_status);
-CREATE INDEX IF NOT EXISTS idx_issues_qa_status ON accessibility_issues(qa_status);
-CREATE INDEX IF NOT EXISTS idx_issues_is_active ON accessibility_issues(is_active);
-CREATE INDEX IF NOT EXISTS idx_issues_project_severity ON accessibility_issues(project_id, severity);
-CREATE INDEX IF NOT EXISTS idx_issues_project_status ON accessibility_issues(project_id, dev_status);
-CREATE INDEX IF NOT EXISTS idx_issues_complex ON accessibility_issues(project_id, severity, dev_status, is_active);
-CREATE INDEX IF NOT EXISTS idx_accessibility_issues_dev_status_updated_at ON accessibility_issues(dev_status_updated_at);
-CREATE INDEX IF NOT EXISTS idx_accessibility_issues_qa_status_updated_at ON accessibility_issues(qa_status_updated_at);
-CREATE INDEX IF NOT EXISTS idx_accessibility_issues_metadata ON accessibility_issues USING GIN (metadata);
-CREATE INDEX IF NOT EXISTS idx_accessibility_issues_sheet_name ON accessibility_issues(sheet_name);
-CREATE INDEX IF NOT EXISTS idx_accessibility_issues_sheet_row ON accessibility_issues(sheet_row_number);
-CREATE UNIQUE INDEX IF NOT EXISTS unique_project_issue_id ON accessibility_issues(project_id, issue_id);
-CREATE UNIQUE INDEX IF NOT EXISTS unique_project_sheet_row ON accessibility_issues(project_id, sheet_name, sheet_row_number);
-
--- -----------------------------------------------------------------------------
 -- 2.5 Reports Table
--- -----------------------------------------------------------------------------
-
 CREATE TABLE IF NOT EXISTS reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     report_type report_type NOT NULL,
-    report_month VARCHAR(20),
-    report_year INTEGER,
     ai_generated_content TEXT,
     edited_content TEXT,
     status report_status NOT NULL DEFAULT 'draft',
@@ -1028,72 +688,15 @@ CREATE TABLE IF NOT EXISTS reports (
     email_body TEXT,
     pdf_path VARCHAR(500),
     created_by VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     is_public BOOLEAN NOT NULL DEFAULT FALSE,
     public_token VARCHAR(64) UNIQUE,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    report_month VARCHAR(20),
+    report_year INTEGER
 );
 
--- Add columns if they don't exist (for existing tables that may be missing newer columns)
--- Using explicit column check for maximum compatibility
-DO $$ 
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'report_month') THEN
-        ALTER TABLE reports ADD COLUMN report_month VARCHAR(20);
-    END IF;
-END $$;
-
-DO $$ 
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'report_year') THEN
-        ALTER TABLE reports ADD COLUMN report_year INTEGER;
-    END IF;
-END $$;
-
-DO $$ 
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'is_public') THEN
-        ALTER TABLE reports ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT FALSE;
-    END IF;
-END $$;
-
-DO $$ 
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'public_token') THEN
-        ALTER TABLE reports ADD COLUMN public_token VARCHAR(64);
-    END IF;
-END $$;
-
--- Report indexes (basic - always safe)
-CREATE INDEX IF NOT EXISTS idx_reports_project_id ON reports(project_id);
-CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
-CREATE INDEX IF NOT EXISTS idx_reports_type ON reports(report_type);
-CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_reports_sent_at ON reports(sent_at);
-CREATE INDEX IF NOT EXISTS idx_reports_project_status ON reports(project_id, status);
-CREATE INDEX IF NOT EXISTS idx_reports_project_status_created ON reports(project_id, status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_reports_complex ON reports(project_id, status, created_at);
-
--- Report indexes (conditional - only if columns exist)
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'report_year') THEN
-        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_reports_month_year ON reports(report_year, report_month) WHERE report_year IS NOT NULL AND report_month IS NOT NULL';
-        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_reports_report_year ON reports(report_year) WHERE report_year IS NOT NULL';
-    END IF;
-END $$;
-
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'public_token') THEN
-        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_reports_public_token ON reports(public_token) WHERE is_public = TRUE';
-    END IF;
-END $$;
-
--- -----------------------------------------------------------------------------
--- 2.6 Report Issues Junction Table
--- -----------------------------------------------------------------------------
-
+-- 2.6 Report Issues Junction
 CREATE TABLE IF NOT EXISTS report_issues (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     report_id UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
@@ -1101,25 +704,7 @@ CREATE TABLE IF NOT EXISTS report_issues (
     included_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
-DO $$ BEGIN
-    ALTER TABLE report_issues ADD CONSTRAINT unique_report_issue UNIQUE (report_id, issue_id);
-EXCEPTION 
-    WHEN duplicate_object THEN NULL;
-    WHEN duplicate_table THEN NULL;
-    WHEN others THEN 
-        IF SQLSTATE = '42P07' THEN NULL; -- relation already exists
-        ELSE RAISE;
-        END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_report_issues_report_id ON report_issues(report_id);
-CREATE INDEX IF NOT EXISTS idx_report_issues_issue_id ON report_issues(issue_id);
-
--- -----------------------------------------------------------------------------
--- 2.7 Report Comments Table
--- -----------------------------------------------------------------------------
-
+-- 2.7 Report Comments
 CREATE TABLE IF NOT EXISTS report_comments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     report_id UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
@@ -1127,16 +712,11 @@ CREATE TABLE IF NOT EXISTS report_comments (
     comment_type VARCHAR(50) NOT NULL DEFAULT 'general',
     author_id VARCHAR(255),
     author_name VARCHAR(255),
-    is_internal BOOLEAN NOT NULL DEFAULT TRUE,
+    is_internal BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_report_comments_report_id ON report_comments(report_id);
-
--- -----------------------------------------------------------------------------
--- 2.8 Issues Table (LEGACY - for backward compatibility)
--- -----------------------------------------------------------------------------
-
+-- 2.8 Issues (Legacy)
 CREATE TABLE IF NOT EXISTS issues (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id),
@@ -1177,39 +757,10 @@ CREATE TABLE IF NOT EXISTS issues (
     assistive_technology TEXT,
     notes TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    dev_status_updated_at TIMESTAMP,
-    qa_status_updated_at TIMESTAMP,
-    metadata JSONB,
-    issue_logged_at TIMESTAMP DEFAULT NOW(),
-    issue_updated_at TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist
-DO $$ BEGIN
-    ALTER TABLE issues ADD CONSTRAINT issues_project_id_sheet_name_url_issue_title_key 
-        UNIQUE (project_id, sheet_name, url, issue_title);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
-CREATE INDEX IF NOT EXISTS idx_issues_url ON issues(url);
-CREATE INDEX IF NOT EXISTS idx_issues_project_url ON issues(project_id, url);
-CREATE INDEX IF NOT EXISTS idx_issues_is_resolved ON issues(is_resolved);
-CREATE INDEX IF NOT EXISTS idx_issues_metadata ON issues USING GIN (metadata);
-CREATE INDEX IF NOT EXISTS idx_issues_issue_logged_at ON issues(issue_logged_at);
-CREATE INDEX IF NOT EXISTS idx_issues_issue_updated_at ON issues(issue_updated_at);
-CREATE INDEX IF NOT EXISTS idx_issues_dev_status_updated_at ON issues(dev_status_updated_at);
-CREATE INDEX IF NOT EXISTS idx_issues_qa_status_updated_at ON issues(qa_status_updated_at);
-CREATE INDEX IF NOT EXISTS issues_project_idx ON issues(project_id);
-
--- ============================================================================
--- SECTION 3: CLIENT PORTAL TABLES
--- ============================================================================
-
--- -----------------------------------------------------------------------------
--- 3.1 Client Users Table
--- -----------------------------------------------------------------------------
-
+-- 2.9 Client Users
 CREATE TABLE IF NOT EXISTS client_users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     clerk_user_id VARCHAR(255) NOT NULL,
@@ -1218,34 +769,14 @@ CREATE TABLE IF NOT EXISTS client_users (
     first_name VARCHAR(100),
     last_name VARCHAR(100),
     role user_role NOT NULL DEFAULT 'viewer',
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    email_notifications BOOLEAN NOT NULL DEFAULT TRUE,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    email_notifications BOOLEAN NOT NULL DEFAULT true,
     last_login_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
-DO $$ BEGIN
-    ALTER TABLE client_users ADD CONSTRAINT unique_clerk_client UNIQUE (clerk_user_id, client_id);
-EXCEPTION 
-    WHEN duplicate_object THEN NULL;
-    WHEN duplicate_table THEN NULL;
-    WHEN others THEN 
-        IF SQLSTATE = '42P07' THEN NULL;
-        ELSE RAISE;
-        END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_client_users_clerk_user_id ON client_users(clerk_user_id);
-CREATE INDEX IF NOT EXISTS idx_client_users_client_id ON client_users(client_id);
-CREATE INDEX IF NOT EXISTS idx_client_users_email ON client_users(email);
-CREATE INDEX IF NOT EXISTS idx_client_users_clerk_id ON client_users(clerk_user_id);
-
--- -----------------------------------------------------------------------------
--- 3.2 Client Team Members Table (Invitations)
--- -----------------------------------------------------------------------------
-
+-- 2.10 Client Team Members
 CREATE TABLE IF NOT EXISTS client_team_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1255,103 +786,50 @@ CREATE TABLE IF NOT EXISTS client_team_members (
     invitation_status invitation_status NOT NULL DEFAULT 'pending',
     invitation_sent_at TIMESTAMP,
     invitation_token VARCHAR(255),
-    clerk_invitation_id VARCHAR(255),
     invited_by_user_id UUID REFERENCES client_users(id) ON DELETE SET NULL,
     accepted_at TIMESTAMP,
     linked_user_id UUID REFERENCES client_users(id) ON DELETE SET NULL,
-    pending_project_ids JSONB DEFAULT '[]',
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    clerk_invitation_id VARCHAR(255),
+    pending_project_ids JSONB DEFAULT '[]'
 );
 
--- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
-DO $$ BEGIN
-    ALTER TABLE client_team_members ADD CONSTRAINT unique_client_team_member_email UNIQUE (client_id, email);
-EXCEPTION 
-    WHEN duplicate_object THEN NULL;
-    WHEN duplicate_table THEN NULL;
-    WHEN others THEN 
-        IF SQLSTATE = '42P07' THEN NULL;
-        ELSE RAISE;
-        END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_client_team_members_client_id ON client_team_members(client_id);
-CREATE INDEX IF NOT EXISTS idx_client_team_members_email ON client_team_members(email);
-CREATE INDEX IF NOT EXISTS idx_client_team_members_invitation_status ON client_team_members(invitation_status);
-CREATE INDEX IF NOT EXISTS idx_client_team_members_invitation_token ON client_team_members(invitation_token);
-CREATE INDEX IF NOT EXISTS idx_client_team_members_clerk_invitation_id ON client_team_members(clerk_invitation_id);
-CREATE INDEX IF NOT EXISTS idx_client_team_members_client_email ON client_team_members(client_id, LOWER(email));
-CREATE INDEX IF NOT EXISTS idx_client_team_members_email_lower ON client_team_members(LOWER(email));
-CREATE INDEX IF NOT EXISTS idx_client_team_members_linked_user_id ON client_team_members(linked_user_id) WHERE linked_user_id IS NOT NULL;
-
--- -----------------------------------------------------------------------------
--- 3.3 Project Team Members Table (User-Project Access)
--- -----------------------------------------------------------------------------
-
+-- 2.11 Project Team Members
 CREATE TABLE IF NOT EXISTS project_team_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     team_member_id UUID NOT NULL REFERENCES client_users(id) ON DELETE CASCADE,
     role project_role NOT NULL DEFAULT 'project_member',
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    display_name VARCHAR(255)
 );
 
--- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
-DO $$ BEGIN
-    ALTER TABLE project_team_members ADD CONSTRAINT unique_project_team_member UNIQUE (project_id, team_member_id);
-EXCEPTION 
-    WHEN duplicate_object THEN NULL;
-    WHEN duplicate_table THEN NULL;
-    WHEN others THEN 
-        IF SQLSTATE = '42P07' THEN NULL;
-        ELSE RAISE;
-        END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_project_team_members_project_id ON project_team_members(project_id);
-CREATE INDEX IF NOT EXISTS idx_project_team_members_team_member_id ON project_team_members(team_member_id);
-
--- -----------------------------------------------------------------------------
--- 3.4 Client Tickets Table
--- -----------------------------------------------------------------------------
-
+-- 2.12 Client Tickets
 CREATE TABLE IF NOT EXISTS client_tickets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
     project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-    created_by_user_id UUID REFERENCES client_users(id) ON DELETE SET NULL,
-    created_by UUID REFERENCES client_users(id) ON DELETE SET NULL,
     title VARCHAR(500) NOT NULL,
     description TEXT NOT NULL,
     status ticket_status NOT NULL DEFAULT 'needs_attention',
     priority ticket_priority NOT NULL DEFAULT 'medium',
     category VARCHAR(50) NOT NULL DEFAULT 'technical',
-    related_issue_id UUID REFERENCES accessibility_issues(id) ON DELETE SET NULL,
+    created_by UUID REFERENCES client_users(id) ON DELETE SET NULL,
     assigned_to UUID REFERENCES client_users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     issues_id VARCHAR(255),
+    created_by_user_id UUID REFERENCES client_users(id) ON DELETE SET NULL,
+    related_issue_id UUID REFERENCES accessibility_issues(id) ON DELETE SET NULL,
     internal_notes TEXT,
     resolution TEXT,
     resolved_at TIMESTAMP,
-    closed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    closed_at TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_client_tickets_client_id ON client_tickets(client_id);
-CREATE INDEX IF NOT EXISTS idx_client_tickets_project_id ON client_tickets(project_id);
-CREATE INDEX IF NOT EXISTS idx_client_tickets_status ON client_tickets(status);
-CREATE INDEX IF NOT EXISTS idx_client_tickets_created_at ON client_tickets(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_client_tickets_assigned_to ON client_tickets(assigned_to);
-CREATE INDEX IF NOT EXISTS idx_client_tickets_created_by ON client_tickets(created_by);
-CREATE INDEX IF NOT EXISTS idx_client_tickets_created_by_user_id ON client_tickets(created_by_user_id);
-CREATE INDEX IF NOT EXISTS idx_client_tickets_issues_id ON client_tickets(issues_id) WHERE issues_id IS NOT NULL;
-
--- -----------------------------------------------------------------------------
--- 3.5 Client Ticket Issues Junction Table
--- -----------------------------------------------------------------------------
-
+-- 2.13 Client Ticket Issues Junction
 CREATE TABLE IF NOT EXISTS client_ticket_issues (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ticket_id UUID NOT NULL REFERENCES client_tickets(id) ON DELETE CASCADE,
@@ -1359,25 +837,7 @@ CREATE TABLE IF NOT EXISTS client_ticket_issues (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
-DO $$ BEGIN
-    ALTER TABLE client_ticket_issues ADD CONSTRAINT unique_ticket_issue UNIQUE (ticket_id, issue_id);
-EXCEPTION 
-    WHEN duplicate_object THEN NULL;
-    WHEN duplicate_table THEN NULL;
-    WHEN others THEN 
-        IF SQLSTATE = '42P07' THEN NULL;
-        ELSE RAISE;
-        END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_client_ticket_issues_ticket_id ON client_ticket_issues(ticket_id);
-CREATE INDEX IF NOT EXISTS idx_client_ticket_issues_issue_id ON client_ticket_issues(issue_id);
-
--- -----------------------------------------------------------------------------
--- 3.6 Evidence Documents Table
--- -----------------------------------------------------------------------------
-
+-- 2.14 Evidence Documents
 CREATE TABLE IF NOT EXISTS evidence_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1402,16 +862,7 @@ CREATE TABLE IF NOT EXISTS evidence_documents (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_evidence_documents_client_id ON evidence_documents(client_id);
-CREATE INDEX IF NOT EXISTS idx_evidence_documents_project_id ON evidence_documents(project_id);
-CREATE INDEX IF NOT EXISTS idx_evidence_documents_status ON evidence_documents(status);
-CREATE INDEX IF NOT EXISTS idx_evidence_documents_document_type ON evidence_documents(document_type);
-CREATE INDEX IF NOT EXISTS idx_evidence_documents_updated_at ON evidence_documents(updated_at DESC);
-
--- -----------------------------------------------------------------------------
--- 3.7 Evidence Document Requests Table
--- -----------------------------------------------------------------------------
-
+-- 2.15 Evidence Document Requests
 CREATE TABLE IF NOT EXISTS evidence_document_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1427,15 +878,7 @@ CREATE TABLE IF NOT EXISTS evidence_document_requests (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_evidence_document_requests_client_id ON evidence_document_requests(client_id);
-CREATE INDEX IF NOT EXISTS idx_evidence_document_requests_requested_by ON evidence_document_requests(requested_by_user_id);
-CREATE INDEX IF NOT EXISTS idx_evidence_document_requests_status ON evidence_document_requests(status);
-CREATE INDEX IF NOT EXISTS idx_evidence_document_requests_created_at ON evidence_document_requests(created_at DESC);
-
--- -----------------------------------------------------------------------------
--- 3.8 Document Remediations Table
--- -----------------------------------------------------------------------------
-
+-- 2.16 Document Remediations
 CREATE TABLE IF NOT EXISTS document_remediations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1447,37 +890,27 @@ CREATE TABLE IF NOT EXISTS document_remediations (
     original_file_type VARCHAR(50),
     page_count INTEGER NOT NULL DEFAULT 1,
     remediation_type remediation_type NOT NULL,
-    status remediation_status NOT NULL DEFAULT 'pending_review',
-    price_per_page NUMERIC(10, 2) NOT NULL,
-    total_price NUMERIC(10, 2) NOT NULL,
-    price_adjusted BOOLEAN DEFAULT FALSE,
-    original_price_per_page NUMERIC(10, 2),
-    original_total_price NUMERIC(10, 2),
+    status remediation_status NOT NULL DEFAULT 'pending',
+    price_per_page NUMERIC(10,2) NOT NULL,
+    total_price NUMERIC(10,2) NOT NULL,
     remediated_file_name VARCHAR(500),
     remediated_file_url VARCHAR(1000),
     remediated_file_size INTEGER,
     remediated_file_type VARCHAR(50),
     notes TEXT,
     admin_notes TEXT,
-    reviewed_by_user_id UUID,
-    reviewed_at TIMESTAMP,
-    rejection_reason TEXT,
     completed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    price_adjusted BOOLEAN DEFAULT false,
+    original_price_per_page NUMERIC(10,2),
+    original_total_price NUMERIC(10,2),
+    reviewed_by_user_id UUID,
+    reviewed_at TIMESTAMP,
+    rejection_reason TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_document_remediations_client_id ON document_remediations(client_id);
-CREATE INDEX IF NOT EXISTS idx_document_remediations_uploaded_by ON document_remediations(uploaded_by_user_id);
-CREATE INDEX IF NOT EXISTS idx_document_remediations_status ON document_remediations(status);
-CREATE INDEX IF NOT EXISTS idx_document_remediations_batch_id ON document_remediations(batch_id);
-CREATE INDEX IF NOT EXISTS idx_document_remediations_created_at ON document_remediations(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_document_remediations_reviewed_by ON document_remediations(reviewed_by_user_id);
-
--- -----------------------------------------------------------------------------
--- 3.9 Client Billing Add-ons Table
--- -----------------------------------------------------------------------------
-
+-- 2.17 Client Billing Add-ons
 CREATE TABLE IF NOT EXISTS client_billing_addons (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1485,8 +918,8 @@ CREATE TABLE IF NOT EXISTS client_billing_addons (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     quantity INTEGER NOT NULL DEFAULT 1,
-    unit_price NUMERIC(10, 2) NOT NULL,
-    total_monthly_price NUMERIC(10, 2) NOT NULL,
+    unit_price NUMERIC(10,2) NOT NULL,
+    total_monthly_price NUMERIC(10,2) NOT NULL,
     status billing_addon_status NOT NULL DEFAULT 'active',
     activated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     cancelled_at TIMESTAMP,
@@ -1496,14 +929,7 @@ CREATE TABLE IF NOT EXISTS client_billing_addons (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_client_billing_addons_client_id ON client_billing_addons(client_id);
-CREATE INDEX IF NOT EXISTS idx_client_billing_addons_addon_type ON client_billing_addons(addon_type);
-CREATE INDEX IF NOT EXISTS idx_client_billing_addons_status ON client_billing_addons(status);
-
--- -----------------------------------------------------------------------------
--- 3.10 Notifications Table
--- -----------------------------------------------------------------------------
-
+-- 2.18 Notifications
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
@@ -1518,44 +944,25 @@ CREATE TABLE IF NOT EXISTS notifications (
     related_document_id UUID,
     related_ticket_id UUID REFERENCES client_tickets(id) ON DELETE SET NULL,
     metadata JSONB DEFAULT '{}',
-    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    is_read BOOLEAN NOT NULL DEFAULT false,
     read_at TIMESTAMP,
-    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    is_archived BOOLEAN NOT NULL DEFAULT false,
     archived_at TIMESTAMP,
     expires_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_notifications_client_id ON notifications(client_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
-CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
-CREATE INDEX IF NOT EXISTS idx_notifications_is_archived ON notifications(is_archived);
-CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_notifications_expires_at ON notifications(expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_notifications_client_unread ON notifications(client_id, is_read, is_archived) WHERE is_read = FALSE AND is_archived = FALSE;
-CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read, is_archived) WHERE is_read = FALSE AND is_archived = FALSE;
-CREATE INDEX IF NOT EXISTS idx_notifications_client_unread_active ON notifications(client_id, is_read, is_archived, created_at DESC) WHERE is_archived = FALSE AND user_id IS NULL;
-CREATE INDEX IF NOT EXISTS idx_notifications_user_unread_active ON notifications(user_id, is_read, is_archived, created_at DESC) WHERE is_archived = FALSE;
-
--- ============================================================================
--- SECTION 4: ADMIN-ONLY TABLES
--- ============================================================================
-
--- -----------------------------------------------------------------------------
--- 4.0a Admin Notifications Table (for admin panel internal notifications)
--- -----------------------------------------------------------------------------
-
+-- 2.19 Admin Notifications
 CREATE TABLE IF NOT EXISTS admin_notifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(255) NOT NULL,
     message TEXT NOT NULL,
     type admin_notification_type DEFAULT 'system',
-    priority VARCHAR(50) DEFAULT 'normal',
-    read BOOLEAN NOT NULL DEFAULT FALSE,
+    priority VARCHAR(20) DEFAULT 'normal',
+    read BOOLEAN NOT NULL DEFAULT false,
     action_url VARCHAR(500),
-    action_label VARCHAR(255),
+    action_label VARCHAR(100),
     metadata JSONB DEFAULT '{}',
     related_client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
     related_ticket_id UUID REFERENCES client_tickets(id) ON DELETE SET NULL,
@@ -1563,15 +970,7 @@ CREATE TABLE IF NOT EXISTS admin_notifications (
     read_at TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_admin_notifications_type ON admin_notifications(type);
-CREATE INDEX IF NOT EXISTS idx_admin_notifications_read ON admin_notifications(read);
-CREATE INDEX IF NOT EXISTS idx_admin_notifications_created_at ON admin_notifications(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_admin_notifications_related_client ON admin_notifications(related_client_id);
-
--- -----------------------------------------------------------------------------
--- 4.0b Clerk User ID Backups Table (for Clerk migration tracking)
--- -----------------------------------------------------------------------------
-
+-- 2.20 Clerk User ID Backups
 CREATE TABLE IF NOT EXISTS clerk_user_id_backups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_user_id UUID NOT NULL,
@@ -1583,13 +982,7 @@ CREATE TABLE IF NOT EXISTS clerk_user_id_backups (
     notes TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_clerk_backups_client_user_id ON clerk_user_id_backups(client_user_id);
-CREATE INDEX IF NOT EXISTS idx_clerk_backups_email ON clerk_user_id_backups(email);
-
--- -----------------------------------------------------------------------------
--- 4.0c Ticket Messages Table (for client ticket conversations)
--- -----------------------------------------------------------------------------
-
+-- 2.21 Ticket Messages
 CREATE TABLE IF NOT EXISTS ticket_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ticket_id UUID NOT NULL REFERENCES client_tickets(id) ON DELETE CASCADE,
@@ -1598,26 +991,16 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
     sender_name VARCHAR(255),
     content TEXT NOT NULL,
     attachments JSONB DEFAULT '[]',
-    is_internal BOOLEAN NOT NULL DEFAULT FALSE,
+    is_internal BOOLEAN NOT NULL DEFAULT false,
     read_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
-CREATE INDEX IF NOT EXISTS idx_ticket_messages_sender_type ON ticket_messages(sender_type);
-CREATE INDEX IF NOT EXISTS idx_ticket_messages_created_at ON ticket_messages(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_created ON ticket_messages(ticket_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_ticket_messages_is_internal ON ticket_messages(is_internal) WHERE is_internal = FALSE;
-
--- -----------------------------------------------------------------------------
--- 4.1 Internal Tickets Table
--- -----------------------------------------------------------------------------
-
+-- 2.22 Tickets (Admin Internal)
 CREATE TABLE IF NOT EXISTS tickets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-    client_id UUID REFERENCES clients(id),
     title VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
     status ticket_status NOT NULL DEFAULT 'open',
@@ -1629,93 +1012,65 @@ CREATE TABLE IF NOT EXISTS tickets (
     actual_hours INTEGER DEFAULT 0,
     wcag_criteria TEXT[],
     tags TEXT[] NOT NULL DEFAULT '{}',
-    ticket_category VARCHAR(50) DEFAULT 'general',
-    related_issue_ids TEXT[] DEFAULT '{}',
-    due_date TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     resolved_at TIMESTAMP,
     closed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    due_date TIMESTAMP,
+    client_id UUID REFERENCES clients(id),
+    related_issue_ids TEXT[] DEFAULT '{}',
+    ticket_category VARCHAR(50) DEFAULT 'general'
 );
 
-CREATE INDEX IF NOT EXISTS idx_tickets_project_id ON tickets(project_id);
-CREATE INDEX IF NOT EXISTS idx_tickets_client ON tickets(client_id);
-CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
-CREATE INDEX IF NOT EXISTS idx_tickets_status_count ON tickets(status);
-CREATE INDEX IF NOT EXISTS idx_tickets_category ON tickets(ticket_category);
-CREATE INDEX IF NOT EXISTS tickets_project_idx ON tickets(project_id);
-CREATE INDEX IF NOT EXISTS tickets_client_idx ON tickets(client_id);
-CREATE INDEX IF NOT EXISTS tickets_status_idx ON tickets(status);
-CREATE INDEX IF NOT EXISTS tickets_priority_idx ON tickets(priority);
-CREATE INDEX IF NOT EXISTS tickets_type_idx ON tickets(type);
-CREATE INDEX IF NOT EXISTS tickets_assignee_idx ON tickets(assignee_id);
-CREATE INDEX IF NOT EXISTS tickets_reporter_idx ON tickets(reporter_id);
-CREATE INDEX IF NOT EXISTS tickets_category_idx ON tickets(ticket_category);
-CREATE INDEX IF NOT EXISTS tickets_due_date_idx ON tickets(due_date);
-CREATE INDEX IF NOT EXISTS tickets_created_at_idx ON tickets(created_at);
-
--- -----------------------------------------------------------------------------
--- 4.2 Ticket Attachments Table
--- -----------------------------------------------------------------------------
-
+-- 2.23 Ticket Attachments
 CREATE TABLE IF NOT EXISTS ticket_attachments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ticket_id UUID NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
     filename VARCHAR(255) NOT NULL,
     original_name VARCHAR(255) NOT NULL,
     file_path VARCHAR(500) NOT NULL,
-    file_size NUMERIC(15, 0) NOT NULL,
+    file_size NUMERIC(15,0) NOT NULL,
     mime_type VARCHAR(100) NOT NULL,
     uploaded_by VARCHAR(255) NOT NULL,
     uploaded_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_ticket_attachments_ticket_id ON ticket_attachments(ticket_id);
-CREATE INDEX IF NOT EXISTS ticket_attachments_ticket_idx ON ticket_attachments(ticket_id);
-CREATE INDEX IF NOT EXISTS ticket_attachments_uploaded_at_idx ON ticket_attachments(uploaded_at);
-
--- -----------------------------------------------------------------------------
--- 4.3 Ticket Comments Table
--- -----------------------------------------------------------------------------
-
+-- 2.24 Ticket Comments
 CREATE TABLE IF NOT EXISTS ticket_comments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     ticket_id UUID NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
     user_id VARCHAR(255) NOT NULL,
     user_name VARCHAR(255) NOT NULL,
     comment TEXT NOT NULL,
-    is_internal BOOLEAN NOT NULL DEFAULT FALSE,
+    is_internal BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_ticket_comments_ticket_id ON ticket_comments(ticket_id);
-CREATE INDEX IF NOT EXISTS ticket_comments_ticket_idx ON ticket_comments(ticket_id);
-CREATE INDEX IF NOT EXISTS ticket_comments_user_idx ON ticket_comments(user_id);
-CREATE INDEX IF NOT EXISTS ticket_comments_created_at_idx ON ticket_comments(created_at);
-
--- -----------------------------------------------------------------------------
--- 4.4 Teams Table
--- -----------------------------------------------------------------------------
-
+-- 2.25 Teams
 CREATE TABLE IF NOT EXISTS teams (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    team_type team_type NOT NULL,
-    manager_id UUID,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    department department NOT NULL,
+    status team_status NOT NULL DEFAULT 'active',
+    team_lead_id UUID,
+    created_by VARCHAR(255),
+    max_members VARCHAR(50),
+    location VARCHAR(255),
+    working_hours VARCHAR(100),
+    email VARCHAR(255),
+    slack_channel VARCHAR(255),
+    budget VARCHAR(50),
+    notes TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    manager_id UUID,
+    team_type VARCHAR(50) DEFAULT 'internal'
 );
 
-CREATE INDEX IF NOT EXISTS idx_teams_team_type ON teams(team_type);
-CREATE INDEX IF NOT EXISTS idx_teams_is_active ON teams(is_active);
-
--- -----------------------------------------------------------------------------
--- 4.5 Team Members Table
--- -----------------------------------------------------------------------------
-
+-- 2.26 Team Members
 CREATE TABLE IF NOT EXISTS team_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
@@ -1737,37 +1092,24 @@ CREATE TABLE IF NOT EXISTS team_members (
     profile_image_url VARCHAR(500),
     linkedin_url VARCHAR(500),
     github_url VARCHAR(500),
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_team_members_team_id ON team_members(team_id);
-CREATE INDEX IF NOT EXISTS idx_team_members_email ON team_members(email);
-CREATE INDEX IF NOT EXISTS idx_team_members_role ON team_members(role);
-CREATE INDEX IF NOT EXISTS idx_team_members_is_active ON team_members(is_active);
-
--- -----------------------------------------------------------------------------
--- 4.6 Project Team Assignments Table
--- -----------------------------------------------------------------------------
-
+-- 2.27 Project Team Assignments
 CREATE TABLE IF NOT EXISTS project_team_assignments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     team_member_id UUID NOT NULL REFERENCES team_members(id) ON DELETE CASCADE,
-    project_role VARCHAR(100),
+    role VARCHAR(100),
     assigned_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    unassigned_at TIMESTAMP,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE
+    assigned_by VARCHAR(255),
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    notes TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_project_team_assignments_project_id ON project_team_assignments(project_id);
-CREATE INDEX IF NOT EXISTS idx_project_team_assignments_team_member_id ON project_team_assignments(team_member_id);
-
--- -----------------------------------------------------------------------------
--- 4.7 Project Staging Credentials Table
--- -----------------------------------------------------------------------------
-
+-- 2.28 Project Staging Credentials
 CREATE TABLE IF NOT EXISTS project_staging_credentials (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1783,26 +1125,15 @@ CREATE TABLE IF NOT EXISTS project_staging_credentials (
     remote_folder_path VARCHAR(500),
     additional_urls TEXT[] DEFAULT '{}',
     notes TEXT,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_active BOOLEAN NOT NULL DEFAULT true,
     expires_at TIMESTAMP,
-    credentials JSONB DEFAULT '{}',
     created_by VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    credentials JSONB DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_project_staging_credentials_project_id ON project_staging_credentials(project_id);
-CREATE INDEX IF NOT EXISTS project_staging_credentials_credentials_idx ON project_staging_credentials USING GIN (credentials);
-CREATE INDEX IF NOT EXISTS project_staging_credentials_project_idx ON project_staging_credentials(project_id);
-CREATE INDEX IF NOT EXISTS project_staging_credentials_type_idx ON project_staging_credentials(type);
-CREATE INDEX IF NOT EXISTS project_staging_credentials_environment_idx ON project_staging_credentials(environment);
-CREATE INDEX IF NOT EXISTS project_staging_credentials_active_idx ON project_staging_credentials(is_active);
-CREATE UNIQUE INDEX IF NOT EXISTS project_staging_credentials_project_type_env_idx ON project_staging_credentials(project_id, type, environment);
-
--- -----------------------------------------------------------------------------
--- 4.8 Client Credentials Table
--- -----------------------------------------------------------------------------
-
+-- 2.29 Client Credentials
 CREATE TABLE IF NOT EXISTS client_credentials (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1816,14 +1147,7 @@ CREATE TABLE IF NOT EXISTS client_credentials (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_client_credentials_client_id ON client_credentials(client_id);
-CREATE INDEX IF NOT EXISTS client_credentials_client_idx ON client_credentials(client_id);
-CREATE INDEX IF NOT EXISTS client_credentials_type_idx ON client_credentials(type);
-
--- -----------------------------------------------------------------------------
--- 4.9 Client Files Table
--- -----------------------------------------------------------------------------
-
+-- 2.30 Client Files
 CREATE TABLE IF NOT EXISTS client_files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -1831,25 +1155,16 @@ CREATE TABLE IF NOT EXISTS client_files (
     original_name VARCHAR(255) NOT NULL,
     category VARCHAR(50) NOT NULL,
     file_path VARCHAR(500) NOT NULL,
-    file_size NUMERIC(15, 0) NOT NULL,
+    file_size NUMERIC(15,0) NOT NULL,
     mime_type VARCHAR(100) NOT NULL,
-    is_encrypted BOOLEAN NOT NULL DEFAULT FALSE,
+    is_encrypted BOOLEAN NOT NULL DEFAULT false,
     uploaded_by VARCHAR(255) NOT NULL,
     uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
     access_level VARCHAR(20) NOT NULL DEFAULT 'public',
     metadata TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_client_files_client_id ON client_files(client_id);
-CREATE INDEX IF NOT EXISTS client_files_client_idx ON client_files(client_id);
-CREATE INDEX IF NOT EXISTS client_files_category_idx ON client_files(category);
-CREATE INDEX IF NOT EXISTS client_files_uploaded_at_idx ON client_files(uploaded_at);
-CREATE INDEX IF NOT EXISTS client_files_access_level_idx ON client_files(access_level);
-
--- -----------------------------------------------------------------------------
--- 4.10 Project Documents Table
--- -----------------------------------------------------------------------------
-
+-- 2.31 Project Documents
 CREATE TABLE IF NOT EXISTS project_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1859,22 +1174,13 @@ CREATE TABLE IF NOT EXISTS project_documents (
     uploaded_by VARCHAR(255) NOT NULL,
     uploaded_at TIMESTAMP NOT NULL DEFAULT NOW(),
     version VARCHAR(50) NOT NULL DEFAULT '1.0',
-    is_latest BOOLEAN NOT NULL DEFAULT TRUE,
+    is_latest BOOLEAN NOT NULL DEFAULT true,
     tags TEXT[] NOT NULL DEFAULT '{}',
-    file_size NUMERIC(15, 0) NOT NULL,
+    file_size NUMERIC(15,0) NOT NULL,
     mime_type VARCHAR(100) NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_project_documents_project_id ON project_documents(project_id);
-CREATE INDEX IF NOT EXISTS project_documents_project_idx ON project_documents(project_id);
-CREATE INDEX IF NOT EXISTS project_documents_type_idx ON project_documents(type);
-CREATE INDEX IF NOT EXISTS project_documents_uploaded_at_idx ON project_documents(uploaded_at);
-CREATE INDEX IF NOT EXISTS project_documents_latest_idx ON project_documents(is_latest);
-
--- -----------------------------------------------------------------------------
--- 4.11 Project Activities Table
--- -----------------------------------------------------------------------------
-
+-- 2.32 Project Activities
 CREATE TABLE IF NOT EXISTS project_activities (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1886,18 +1192,7 @@ CREATE TABLE IF NOT EXISTS project_activities (
     timestamp TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_activities_project_id ON project_activities(project_id);
-CREATE INDEX IF NOT EXISTS idx_activities_timestamp ON project_activities(timestamp);
-CREATE INDEX IF NOT EXISTS idx_activities_recent_timestamp ON project_activities(timestamp DESC);
-CREATE INDEX IF NOT EXISTS project_activities_project_idx ON project_activities(project_id);
-CREATE INDEX IF NOT EXISTS project_activities_user_idx ON project_activities(user_id);
-CREATE INDEX IF NOT EXISTS project_activities_action_idx ON project_activities(action);
-CREATE INDEX IF NOT EXISTS project_activities_timestamp_idx ON project_activities(timestamp);
-
--- -----------------------------------------------------------------------------
--- 4.12 Project Developers Table
--- -----------------------------------------------------------------------------
-
+-- 2.33 Project Developers
 CREATE TABLE IF NOT EXISTS project_developers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1906,22 +1201,12 @@ CREATE TABLE IF NOT EXISTS project_developers (
     responsibilities TEXT[] NOT NULL DEFAULT '{}',
     assigned_at TIMESTAMP NOT NULL DEFAULT NOW(),
     assigned_by VARCHAR(255) NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    hourly_rate NUMERIC(8, 2),
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    hourly_rate NUMERIC(8,2),
     max_hours_per_week INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS idx_project_developers_project_id ON project_developers(project_id);
-CREATE INDEX IF NOT EXISTS project_developers_project_idx ON project_developers(project_id);
-CREATE INDEX IF NOT EXISTS project_developers_developer_idx ON project_developers(developer_id);
-CREATE INDEX IF NOT EXISTS project_developers_role_idx ON project_developers(role);
-CREATE INDEX IF NOT EXISTS project_developers_active_idx ON project_developers(is_active);
-CREATE UNIQUE INDEX IF NOT EXISTS project_developers_project_developer_idx ON project_developers(project_id, developer_id);
-
--- -----------------------------------------------------------------------------
--- 4.13 Project Milestones Table
--- -----------------------------------------------------------------------------
-
+-- 2.34 Project Milestones
 CREATE TABLE IF NOT EXISTS project_milestones (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1939,43 +1224,23 @@ CREATE TABLE IF NOT EXISTS project_milestones (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_project_milestones_project_id ON project_milestones(project_id);
-CREATE INDEX IF NOT EXISTS project_milestones_project_idx ON project_milestones(project_id);
-CREATE INDEX IF NOT EXISTS project_milestones_status_idx ON project_milestones(status);
-CREATE INDEX IF NOT EXISTS project_milestones_due_date_idx ON project_milestones(due_date);
-CREATE INDEX IF NOT EXISTS project_milestones_order_idx ON project_milestones("order");
-
--- -----------------------------------------------------------------------------
--- 4.14 Project Time Entries Table
--- -----------------------------------------------------------------------------
-
+-- 2.35 Project Time Entries
 CREATE TABLE IF NOT EXISTS project_time_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     developer_id VARCHAR(255) NOT NULL,
     date TIMESTAMP NOT NULL,
-    hours NUMERIC(4, 2) NOT NULL,
+    hours NUMERIC(4,2) NOT NULL,
     description TEXT NOT NULL,
     category time_entry_category NOT NULL,
-    billable BOOLEAN NOT NULL DEFAULT TRUE,
-    approved BOOLEAN NOT NULL DEFAULT FALSE,
+    billable BOOLEAN NOT NULL DEFAULT true,
+    approved BOOLEAN NOT NULL DEFAULT false,
     approved_by VARCHAR(255),
     approved_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_project_time_entries_project_id ON project_time_entries(project_id);
-CREATE INDEX IF NOT EXISTS project_time_entries_project_idx ON project_time_entries(project_id);
-CREATE INDEX IF NOT EXISTS project_time_entries_developer_idx ON project_time_entries(developer_id);
-CREATE INDEX IF NOT EXISTS project_time_entries_date_idx ON project_time_entries(date);
-CREATE INDEX IF NOT EXISTS project_time_entries_category_idx ON project_time_entries(category);
-CREATE INDEX IF NOT EXISTS project_time_entries_billable_idx ON project_time_entries(billable);
-CREATE INDEX IF NOT EXISTS project_time_entries_approved_idx ON project_time_entries(approved);
-
--- -----------------------------------------------------------------------------
--- 4.15 Sync Logs Table
--- -----------------------------------------------------------------------------
-
+-- 2.36 Sync Logs
 CREATE TABLE IF NOT EXISTS sync_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id),
@@ -1995,17 +1260,7 @@ CREATE TABLE IF NOT EXISTS sync_logs (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_sync_logs_project_id ON sync_logs(project_id);
-CREATE INDEX IF NOT EXISTS idx_sync_logs_created_at ON sync_logs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sync_logs_started_at ON sync_logs(started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sync_logs_status ON sync_logs(status);
-CREATE INDEX IF NOT EXISTS idx_sync_logs_sync_type ON sync_logs(sync_type);
-CREATE INDEX IF NOT EXISTS idx_sync_logs_project_type ON sync_logs(project_id, sync_type);
-
--- -----------------------------------------------------------------------------
--- 4.16 Project Sync Status Table
--- -----------------------------------------------------------------------------
-
+-- 2.37 Project Sync Status
 CREATE TABLE IF NOT EXISTS project_sync_status (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id),
@@ -2036,20 +1291,7 @@ CREATE TABLE IF NOT EXISTS project_sync_status (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_project_sync_status_project_id ON project_sync_status(project_id);
-CREATE INDEX IF NOT EXISTS idx_project_sync_status_created_at ON project_sync_status(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_project_sync_status_sheet_id ON project_sync_status(sheet_id);
-CREATE INDEX IF NOT EXISTS idx_project_sync_status_started_at ON project_sync_status(started_at);
-CREATE INDEX IF NOT EXISTS idx_project_sync_status_status ON project_sync_status(sync_status);
-CREATE INDEX IF NOT EXISTS idx_project_sync_status_sync_type ON project_sync_status(sync_type);
-CREATE INDEX IF NOT EXISTS idx_sync_project_id ON project_sync_status(project_id);
-CREATE INDEX IF NOT EXISTS idx_sync_started_at ON project_sync_status(started_at);
-CREATE INDEX IF NOT EXISTS idx_sync_status ON project_sync_status(sync_status);
-
--- -----------------------------------------------------------------------------
--- 4.17 Checkpoint Sync Table
--- -----------------------------------------------------------------------------
-
+-- 2.38 Checkpoint Sync
 CREATE TABLE IF NOT EXISTS checkpoint_sync (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id),
@@ -2059,26 +1301,7 @@ CREATE TABLE IF NOT EXISTS checkpoint_sync (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
-DO $$ BEGIN
-    ALTER TABLE checkpoint_sync ADD CONSTRAINT checkpoint_sync_project_id_sheet_id_key UNIQUE (project_id, sheet_id);
-EXCEPTION 
-    WHEN duplicate_object THEN NULL;
-    WHEN duplicate_table THEN NULL;
-    WHEN others THEN 
-        IF SQLSTATE = '42P07' THEN NULL;
-        ELSE RAISE;
-        END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_checkpoint_sync_project_id ON checkpoint_sync(project_id);
-CREATE INDEX IF NOT EXISTS idx_checkpoint_sync_created_at ON checkpoint_sync(created_at DESC);
-CREATE INDEX IF NOT EXISTS checkpoint_sync_project_idx ON checkpoint_sync(project_id);
-
--- -----------------------------------------------------------------------------
--- 4.18 Status Table
--- -----------------------------------------------------------------------------
-
+-- 2.39 Status
 CREATE TABLE IF NOT EXISTS status (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id),
@@ -2099,29 +1322,7 @@ CREATE TABLE IF NOT EXISTS status (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
-DO $$ BEGIN
-    ALTER TABLE status ADD CONSTRAINT status_project_id_url_key UNIQUE (project_id, url);
-EXCEPTION 
-    WHEN duplicate_object THEN NULL;
-    WHEN duplicate_table THEN NULL;
-    WHEN others THEN 
-        IF SQLSTATE = '42P07' THEN NULL;
-        ELSE RAISE;
-        END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_status_project_id ON status(project_id);
-CREATE INDEX IF NOT EXISTS idx_status_url ON status(url);
-CREATE INDEX IF NOT EXISTS idx_status_status ON status(status);
-CREATE INDEX IF NOT EXISTS idx_status_created_at ON status(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_status_project_url ON status(project_id, url);
-CREATE INDEX IF NOT EXISTS status_project_idx ON status(project_id);
-
--- -----------------------------------------------------------------------------
--- 4.19 Status Check Table
--- -----------------------------------------------------------------------------
-
+-- 2.40 Status Check
 CREATE TABLE IF NOT EXISTS status_check (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id),
@@ -2133,29 +1334,7 @@ CREATE TABLE IF NOT EXISTS status_check (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Add unique constraint if it doesn't exist (handles both constraint and index conflicts)
-DO $$ BEGIN
-    ALTER TABLE status_check ADD CONSTRAINT status_check_project_id_test_scenario_url_key UNIQUE (project_id, test_scenario, url);
-EXCEPTION 
-    WHEN duplicate_object THEN NULL;
-    WHEN duplicate_table THEN NULL;
-    WHEN others THEN 
-        IF SQLSTATE = '42P07' THEN NULL;
-        ELSE RAISE;
-        END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_status_check_project_id ON status_check(project_id);
-CREATE INDEX IF NOT EXISTS idx_status_check_url ON status_check(url);
-CREATE INDEX IF NOT EXISTS idx_status_check_status ON status_check(status);
-CREATE INDEX IF NOT EXISTS idx_status_check_created_at ON status_check(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_status_check_project_url ON status_check(project_id, url);
-CREATE INDEX IF NOT EXISTS status_check_project_idx ON status_check(project_id);
-
--- -----------------------------------------------------------------------------
--- 4.20 Issue Comments Table
--- -----------------------------------------------------------------------------
-
+-- 2.41 Issue Comments
 CREATE TABLE IF NOT EXISTS issue_comments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     issue_id UUID NOT NULL REFERENCES accessibility_issues(id) ON DELETE CASCADE,
@@ -2167,100 +1346,144 @@ CREATE TABLE IF NOT EXISTS issue_comments (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS issue_comments_issue_idx ON issue_comments(issue_id);
-
--- -----------------------------------------------------------------------------
--- 4.21 WCAG URL Check Table (For detailed WCAG tracking per URL)
--- -----------------------------------------------------------------------------
-
+-- 2.42 WCAG URL Check (many columns - simplified)
 CREATE TABLE IF NOT EXISTS wcag_url_check (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id),
     test_scenario TEXT,
-    -- WCAG 1.x criteria
-    "_111_non_text_content_a" TEXT,
-    "_121_audio_only_and_video_only_prerecorded_a" TEXT,
-    "_122_captions_prerecorded_a" TEXT,
-    "_123_audio_description_or_media_alternative_prerecorded_a" TEXT,
-    "_124_captions_live_aa" TEXT,
-    "_125_audio_description_prerecorded_aa" TEXT,
-    "_131_info_and_relationships_a" TEXT,
-    "_132_meaningful_sequence_a" TEXT,
-    "_133_sensory_characteristics_a" TEXT,
-    "_134_orientation_aa" TEXT,
-    "_135_identify_input_purpose_aa" TEXT,
-    "_141_use_of_color_a" TEXT,
-    "_142_audio_control_a" TEXT,
-    "_143_contrast_minimum_aa" TEXT,
-    "_144_resize_text_aa" TEXT,
-    "_145_images_of_text_aa" TEXT,
-    "_1410_reflow_aa" TEXT,
-    "_1411_non_text_contrast_aa" TEXT,
-    "_1412_text_spacing_aa" TEXT,
-    "_1413_content_on_hover_or_focus_aa" TEXT,
-    -- WCAG 2.x criteria
-    "_211_keyboard_a" TEXT,
-    "_212_no_keyboard_trap_a" TEXT,
-    "_214_character_key_shortcuts_a" TEXT,
-    "_221_timing_adjustable_a" TEXT,
-    "_222_pause_stop_hide_a" TEXT,
-    "_231_three_flashes_or_below_threshold_a" TEXT,
-    "_241_bypass_blocks_a" TEXT,
-    "_242_page_titled_a" TEXT,
-    "_243_focus_order_a" TEXT,
-    "_244_link_purpose_in_context_a" TEXT,
-    "_245_multiple_ways_aa" TEXT,
-    "_246_headings_and_labels_aa" TEXT,
-    "_247_focus_visible_aa" TEXT,
-    "_251_pointer_gestures_a" TEXT,
-    "_252_pointer_cancellation_a" TEXT,
-    "_253_label_in_name_a" TEXT,
-    "_254_motion_actuation_a" TEXT,
-    "_257_dragging_movements_aa" TEXT,
-    "_258_target_size_minimum_aa" TEXT,
-    "_2411_focus_not_obscured_minimum_aa" TEXT,
-    -- WCAG 3.x criteria  
-    "_311_language_of_page_a" TEXT,
-    "_312_language_of_parts_aa" TEXT,
-    "_321_on_focus_a" TEXT,
-    "_322_on_input_a" TEXT,
-    "_323_consistent_navigation_aa" TEXT,
-    "_324_consistent_identification_aa" TEXT,
-    "_326_consistent_help_aa" TEXT,
-    "_331_error_identification_a" TEXT,
-    "_332_labels_or_instructions_a" TEXT,
-    "_333_error_suggestion_aa" TEXT,
-    "_334_error_prevention_legal_financial_data_aa" TEXT,
-    "_337_redundant_entry_a" TEXT,
-    "_338_accessible_authentication_minimum_aa" TEXT,
-    -- WCAG 4.x criteria
-    "_411_parsing_aa" TEXT,
-    "_412_name_role_value_a" TEXT,
-    "_413_status_messages_aa" TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_wcag_url_check_project_id ON wcag_url_check(project_id);
-CREATE INDEX IF NOT EXISTS idx_wcag_url_check_test_scenario ON wcag_url_check(test_scenario);
-CREATE INDEX IF NOT EXISTS idx_wcag_url_check_created_at ON wcag_url_check(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_wcag_url_check_project_scenario ON wcag_url_check(project_id, test_scenario);
+-- ============================================================================
+-- SECTION 3: UNIQUE CONSTRAINTS (with safe handling)
+-- ============================================================================
+
+DO $$ BEGIN
+    ALTER TABLE report_issues ADD CONSTRAINT unique_report_issue UNIQUE (report_id, issue_id);
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN others THEN IF SQLSTATE = '42P07' THEN NULL; ELSE RAISE; END IF; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE client_users ADD CONSTRAINT unique_clerk_client UNIQUE (clerk_user_id, client_id);
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN others THEN IF SQLSTATE = '42P07' THEN NULL; ELSE RAISE; END IF; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE client_team_members ADD CONSTRAINT unique_client_team_member_email UNIQUE (client_id, email);
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN others THEN IF SQLSTATE = '42P07' THEN NULL; ELSE RAISE; END IF; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE project_team_members ADD CONSTRAINT unique_project_team_member UNIQUE (project_id, team_member_id);
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN others THEN IF SQLSTATE = '42P07' THEN NULL; ELSE RAISE; END IF; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE client_ticket_issues ADD CONSTRAINT unique_ticket_issue UNIQUE (ticket_id, issue_id);
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN others THEN IF SQLSTATE = '42P07' THEN NULL; ELSE RAISE; END IF; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE checkpoint_sync ADD CONSTRAINT checkpoint_sync_project_id_sheet_id_key UNIQUE (project_id, sheet_id);
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN others THEN IF SQLSTATE = '42P07' THEN NULL; ELSE RAISE; END IF; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE status ADD CONSTRAINT status_project_id_url_key UNIQUE (project_id, url);
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN others THEN IF SQLSTATE = '42P07' THEN NULL; ELSE RAISE; END IF; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE status_check ADD CONSTRAINT status_check_project_id_test_scenario_url_key UNIQUE (project_id, test_scenario, url);
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN others THEN IF SQLSTATE = '42P07' THEN NULL; ELSE RAISE; END IF; END $$;
+
+DO $$ BEGIN
+    ALTER TABLE issues ADD CONSTRAINT issues_project_id_sheet_name_url_issue_title_key UNIQUE (project_id, sheet_name, url, issue_title);
+EXCEPTION WHEN duplicate_object THEN NULL; WHEN others THEN IF SQLSTATE = '42P07' THEN NULL; ELSE RAISE; END IF; END $$;
+
+-- ============================================================================
+-- SECTION 4: INDEXES (matching production)
+-- ============================================================================
+
+-- Clients indexes
+CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status);
+CREATE INDEX IF NOT EXISTS idx_clients_type ON clients(client_type);
+CREATE INDEX IF NOT EXISTS clients_email_idx ON clients(email);
+
+-- Projects indexes
+CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+CREATE INDEX IF NOT EXISTS projects_sheet_id_idx ON projects(sheet_id);
+
+-- Test URLs indexes
+CREATE UNIQUE INDEX IF NOT EXISTS test_urls_project_url_idx ON test_urls(project_id, url);
+CREATE INDEX IF NOT EXISTS idx_test_urls_project_id ON test_urls(project_id);
+
+-- Accessibility Issues indexes
+CREATE UNIQUE INDEX IF NOT EXISTS unique_project_issue_id ON accessibility_issues(project_id, issue_id);
+CREATE INDEX IF NOT EXISTS idx_accessibility_issues_project_id ON accessibility_issues(project_id);
+CREATE INDEX IF NOT EXISTS idx_accessibility_issues_url_id ON accessibility_issues(url_id);
+CREATE INDEX IF NOT EXISTS accessibility_issues_sent_to_user_idx ON accessibility_issues(sent_to_user);
+CREATE INDEX IF NOT EXISTS accessibility_issues_dev_status_idx ON accessibility_issues(dev_status);
+CREATE INDEX IF NOT EXISTS accessibility_issues_severity_idx ON accessibility_issues(severity);
+
+-- Reports indexes
+CREATE INDEX IF NOT EXISTS idx_reports_project_id ON reports(project_id);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
+
+-- Client Users indexes
+CREATE INDEX IF NOT EXISTS idx_client_users_clerk_user_id ON client_users(clerk_user_id);
+CREATE INDEX IF NOT EXISTS idx_client_users_client_id ON client_users(client_id);
+
+-- Client Team Members indexes
+CREATE INDEX IF NOT EXISTS idx_client_team_members_client_id ON client_team_members(client_id);
+CREATE INDEX IF NOT EXISTS idx_client_team_members_invitation_status ON client_team_members(invitation_status);
+
+-- Project Team Members indexes
+CREATE INDEX IF NOT EXISTS idx_project_team_members_project_id ON project_team_members(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_team_members_team_member_id ON project_team_members(team_member_id);
+
+-- Client Tickets indexes
+CREATE INDEX IF NOT EXISTS idx_client_tickets_client_id ON client_tickets(client_id);
+CREATE INDEX IF NOT EXISTS idx_client_tickets_status ON client_tickets(status);
+
+-- Notifications indexes
+CREATE INDEX IF NOT EXISTS idx_notifications_client_id ON notifications(client_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
+
+-- Admin Notifications indexes
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_read ON admin_notifications(read);
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_created_at ON admin_notifications(created_at);
+
+-- Ticket Messages indexes
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
+
+-- Teams indexes
+CREATE INDEX IF NOT EXISTS idx_teams_status ON teams(status);
+
+-- Team Members indexes
+CREATE INDEX IF NOT EXISTS idx_team_members_team_id ON team_members(team_id);
+
+-- Project unique indexes
+CREATE UNIQUE INDEX IF NOT EXISTS project_staging_credentials_project_type_env_idx ON project_staging_credentials(project_id, type, environment);
+CREATE UNIQUE INDEX IF NOT EXISTS project_developers_project_developer_idx ON project_developers(project_id, developer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS unique_project_test_scenario ON wcag_url_check(project_id, test_scenario);
 
+-- Sync indexes
+CREATE INDEX IF NOT EXISTS idx_sync_logs_project_id ON sync_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_sync_status_project_id ON project_sync_status(project_id);
+
+-- Issue Comments index
+CREATE INDEX IF NOT EXISTS issue_comments_issue_idx ON issue_comments(issue_id);
+
 -- ============================================================================
--- SECTION 5: TRIGGERS FOR AUTO-UPDATING updated_at
+-- SECTION 5: TRIGGER FOR updated_at
 -- ============================================================================
 
--- Create a reusable function for updating timestamps
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ language 'plpgsql';
 
--- Apply trigger to all tables with updated_at column
+-- Apply triggers to all tables with updated_at column
 DO $$
 DECLARE
     t RECORD;
@@ -2282,41 +1505,13 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- SECTION 6: CLEANUP HELPER FUNCTION
+-- SECTION 6: VERIFICATION
 -- ============================================================================
 
--- Drop the helper function if we created it
-DROP FUNCTION IF EXISTS add_enum_value_if_not_exists(TEXT, TEXT);
-
--- ============================================================================
--- SECTION 7: VERIFICATION QUERIES
--- ============================================================================
-
--- Display all created tables
 SELECT 'Tables created:' as info;
-SELECT table_name 
-FROM information_schema.tables 
-WHERE table_schema = 'public' 
-AND table_type = 'BASE TABLE'
-ORDER BY table_name;
+SELECT COUNT(*) as table_count FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
 
--- Display all created enum types
 SELECT 'Enum types created:' as info;
-SELECT typname 
-FROM pg_type 
-WHERE typtype = 'e' 
-AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
-ORDER BY typname;
-
--- Count tables and enums
-SELECT 
-    'Summary:' as info,
-    (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE') as table_count,
-    (SELECT COUNT(*) FROM pg_type WHERE typtype = 'e' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) as enum_count;
-
--- ============================================================================
--- END OF SCRIPT
--- ============================================================================
+SELECT COUNT(*) as enum_count FROM pg_type WHERE typtype = 'e' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
 
 SELECT 'A3S Platform database setup complete!' as status;
-
