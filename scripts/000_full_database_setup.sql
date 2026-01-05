@@ -1035,20 +1035,36 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 
 -- Add columns if they don't exist (for existing tables that may be missing newer columns)
-DO $$ BEGIN
-    ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_month VARCHAR(20);
-EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN
-    ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_year INTEGER;
-EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN
-    ALTER TABLE reports ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE;
-EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN
-    ALTER TABLE reports ADD COLUMN IF NOT EXISTS public_token VARCHAR(64);
-EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+-- Using explicit column check for maximum compatibility
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'report_month') THEN
+        ALTER TABLE reports ADD COLUMN report_month VARCHAR(20);
+    END IF;
+END $$;
 
--- Report indexes
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'report_year') THEN
+        ALTER TABLE reports ADD COLUMN report_year INTEGER;
+    END IF;
+END $$;
+
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'is_public') THEN
+        ALTER TABLE reports ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+END $$;
+
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'public_token') THEN
+        ALTER TABLE reports ADD COLUMN public_token VARCHAR(64);
+    END IF;
+END $$;
+
+-- Report indexes (basic - always safe)
 CREATE INDEX IF NOT EXISTS idx_reports_project_id ON reports(project_id);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
 CREATE INDEX IF NOT EXISTS idx_reports_type ON reports(report_type);
@@ -1057,9 +1073,22 @@ CREATE INDEX IF NOT EXISTS idx_reports_sent_at ON reports(sent_at);
 CREATE INDEX IF NOT EXISTS idx_reports_project_status ON reports(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_reports_project_status_created ON reports(project_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reports_complex ON reports(project_id, status, created_at);
-CREATE INDEX IF NOT EXISTS idx_reports_month_year ON reports(report_year, report_month) WHERE report_year IS NOT NULL AND report_month IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_reports_report_year ON reports(report_year) WHERE report_year IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_reports_public_token ON reports(public_token) WHERE is_public = TRUE;
+
+-- Report indexes (conditional - only if columns exist)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'report_year') THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_reports_month_year ON reports(report_year, report_month) WHERE report_year IS NOT NULL AND report_month IS NOT NULL';
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_reports_report_year ON reports(report_year) WHERE report_year IS NOT NULL';
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'reports' AND column_name = 'public_token') THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_reports_public_token ON reports(public_token) WHERE is_public = TRUE';
+    END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- 2.6 Report Issues Junction Table
