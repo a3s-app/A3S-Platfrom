@@ -801,3 +801,4 @@ ADMIN_PANEL_API_URL=https://admin.yourdomain.com
 *For database schema details, see [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md)*  
 *For overall architecture, see [ARCHITECTURE.md](./ARCHITECTURE.md)*
 
+

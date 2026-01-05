@@ -9,10 +9,16 @@
 -- 
 -- IMPORTANT: This script matches the PRODUCTION database exactly.
 --
+-- NOTE ON EXISTING TABLES:
+--   CREATE TABLE IF NOT EXISTS only creates NEW tables - it does NOT add
+--   missing columns to existing tables. If you have existing tables that
+--   might be missing columns, run 001_add_missing_columns.sql afterwards.
+--
 -- Usage:
---   psql -d your_database -f 000_full_database_setup.sql
+--   1. psql -d your_database -f 000_full_database_setup.sql
+--   2. psql -d your_database -f 001_add_missing_columns.sql  (if tables existed)
 --   OR
---   Run via Supabase SQL Editor
+--   Run via Supabase SQL Editor (both scripts in sequence)
 --
 -- Last Updated: January 2026
 -- ============================================================================
@@ -1656,3 +1662,13 @@ SELECT 'Enum types created:' as info;
 SELECT COUNT(*) as enum_count FROM pg_type WHERE typtype = 'e' AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
 
 SELECT 'A3S Platform database setup complete!' as status;
+
+-- ============================================================================
+-- NEXT STEP (if upgrading existing database)
+-- ============================================================================
+-- If you have existing tables that might be missing newer columns, run:
+--   scripts/001_add_missing_columns.sql
+-- 
+-- This adds ALL columns to ALL tables if they don't exist.
+-- CREATE TABLE IF NOT EXISTS only creates new tables - it doesn't modify existing ones.
+-- ============================================================================

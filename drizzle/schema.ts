@@ -1726,3 +1726,4 @@ export type NewTicketMessage = typeof ticketMessages.$inferInsert;
 export type AdminNotification = typeof adminNotifications.$inferSelect;
 export type NewAdminNotification = typeof adminNotifications.$inferInsert;
 
+
