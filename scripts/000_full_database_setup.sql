@@ -979,7 +979,7 @@ CREATE TABLE IF NOT EXISTS accessibility_issues (
 
 -- Accessibility Issues indexes (MOST QUERIED TABLE - comprehensive indexing)
 -- Note: unique_project_issue_id is created as a UNIQUE INDEX below (handles both constraint and index cases)
-CREATE UNIQUE INDEX IF NOT EXISTS accessibility_issues_project_url_title_unique ON accessibility_issues(project_id, url_id, issue_title);
+-- Note: accessibility_issues_project_url_title_unique removed - production data has duplicates
 CREATE INDEX IF NOT EXISTS idx_accessibility_issues_issue_id ON accessibility_issues(issue_id);
 CREATE INDEX IF NOT EXISTS accessibility_issues_project_url_idx ON accessibility_issues(project_id, url_id);
 CREATE INDEX IF NOT EXISTS accessibility_issues_dev_status_idx ON accessibility_issues(dev_status);
