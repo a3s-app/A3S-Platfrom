@@ -65,13 +65,16 @@ The A3S Platform uses a **single PostgreSQL database** shared between two applic
 ║   │                       ADMIN-ONLY TABLES                                  │    ║
 ║   │  (Only Admin Dashboard reads/writes)                                     │    ║
 ║   ├─────────────────────────────────────────────────────────────────────────┤    ║
-║   │  • tickets                   - Internal work tickets                     │    ║
+║   │  • admin_notifications       - Admin panel internal notifications ★NEW  │    ║
+║   │  • clerk_user_id_backups     - Clerk migration tracking ★NEW            │    ║
+║   │  • ticket_messages           - Client ticket conversations ★NEW         │    ║
+║   │  • tickets                   - Internal work tickets                    │    ║
 ║   │  • ticket_attachments        - Files attached to tickets                │    ║
 ║   │  • ticket_comments           - Internal ticket comments                 │    ║
 ║   │  • teams                     - Internal teams                           │    ║
 ║   │  • team_members              - Internal team members                    │    ║
 ║   │  • project_team_assignments  - Team → Project assignments               │    ║
-║   │  • project_staging_credentials - Staging/prod credentials              │    ║
+║   │  • project_staging_credentials - Staging/prod credentials               │    ║
 ║   │  • client_credentials        - Client platform credentials              │    ║
 ║   │  • client_files              - Client document uploads                  │    ║
 ║   │  • project_documents         - Project-level documents                  │    ║
@@ -151,8 +154,8 @@ The A3S Platform uses a **single PostgreSQL database** shared between two applic
 
 | Enum Name | Values | Used In |
 |-----------|--------|---------|
-| `ticket_status` | `open`, `in_progress`, `resolved`, `closed` | `tickets.status`, `client_tickets.status` |
-| `ticket_priority` | `low`, `medium`, `high`, `critical` | `tickets.priority`, `client_tickets.priority` |
+| `ticket_status` | `open`, `in_progress`, `resolved`, `closed`, `needs_attention`, `third_party`, `fixed` | `tickets.status`, `client_tickets.status` |
+| `ticket_priority` | `low`, `medium`, `high`, `critical`, `urgent` | `tickets.priority`, `client_tickets.priority` |
 | `ticket_type` | `bug`, `feature`, `task`, `accessibility`, `improvement` | `tickets.type` |
 | `ticket_category` | `technical`, `billing`, `general`, `feature_request`, `bug_report`, `other` | `client_tickets.category` |
 
@@ -205,6 +208,17 @@ The A3S Platform uses a **single PostgreSQL database** shared between two applic
 | `author_role` | `developer`, `qa_tester`, `accessibility_expert`, `project_manager`, `client` | `issue_comments.author_role` |
 | `billing_addon_type` | `team_members`, `document_remediation`, `evidence_locker`, `custom` | `client_billing_addons.addon_type` |
 | `billing_addon_status` | `active`, `cancelled`, `pending` | `client_billing_addons.status` |
+
+### Admin & System Enums
+
+| Enum Name | Values | Used In |
+|-----------|--------|---------|
+| `admin_notification_type` | `system`, `new_ticket`, `new_remediation_request`, `new_document_request`, `client_signup`, `custom` | `admin_notifications.type` |
+| `department` | `executive`, `development`, `design`, `quality_assurance`, `project_management`, `accessibility`, `consulting`, `operations` | Team organization |
+| `member_role` | `developer`, `ceo`, `team_lead`, `senior_developer`, `designer`, `qa_engineer`, `project_manager`, `accessibility_specialist`, `consultant`, `intern` | Team member roles |
+| `member_status` | `active`, `inactive`, `on_leave`, `terminated` | Team member status |
+| `message_sender_type` | `admin`, `client` | `ticket_messages.sender_type` |
+| `team_status` | `active`, `inactive`, `archived` | Team status |
 
 ---
 
@@ -777,7 +791,86 @@ PDF remediation requests from clients.
 
 ### Admin-Only Tables
 
-*For brevity, see the SQL setup script for complete column definitions of:*
+#### `admin_notifications`
+
+Internal notifications for admin dashboard (new tickets, requests, etc).
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | NO | `gen_random_uuid()` | Primary key |
+| `title` | VARCHAR(255) | NO | - | Notification title |
+| `message` | TEXT | NO | - | Message content |
+| `type` | ENUM | YES | `system` | Notification type |
+| `priority` | VARCHAR(50) | YES | `normal` | Priority level |
+| `read` | BOOLEAN | NO | `false` | Is read? |
+| `action_url` | VARCHAR(500) | YES | - | Link URL |
+| `action_label` | VARCHAR(255) | YES | - | Link label |
+| `metadata` | JSONB | YES | `{}` | Additional data |
+| `related_client_id` | UUID | YES | - | Related client |
+| `related_ticket_id` | UUID | YES | - | Related ticket |
+| `created_at` | TIMESTAMP | NO | `NOW()` | Created timestamp |
+| `read_at` | TIMESTAMP | YES | - | When read |
+
+**Indexes:**
+- `idx_admin_notifications_type` on `type`
+- `idx_admin_notifications_read` on `read`
+- `idx_admin_notifications_created_at` on `created_at DESC`
+- `idx_admin_notifications_related_client` on `related_client_id`
+
+---
+
+#### `clerk_user_id_backups`
+
+Backup table for Clerk user ID migrations.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | NO | `gen_random_uuid()` | Primary key |
+| `client_user_id` | UUID | NO | - | Related client_user |
+| `email` | VARCHAR(255) | NO | - | User email |
+| `old_clerk_user_id` | VARCHAR(255) | NO | - | Previous Clerk ID |
+| `new_clerk_user_id` | VARCHAR(255) | NO | - | New Clerk ID |
+| `migrated_at` | TIMESTAMP | NO | `NOW()` | Migration time |
+| `rolled_back_at` | TIMESTAMP | YES | - | Rollback time |
+| `notes` | TEXT | YES | - | Notes |
+
+**Indexes:**
+- `idx_clerk_backups_client_user_id` on `client_user_id`
+- `idx_clerk_backups_email` on `email`
+
+---
+
+#### `ticket_messages`
+
+Conversation messages on client tickets.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | NO | `gen_random_uuid()` | Primary key |
+| `ticket_id` | UUID | NO | - | FK to client_tickets |
+| `sender_type` | ENUM | NO | - | `admin` or `client` |
+| `sender_id` | UUID | YES | - | Sender user ID |
+| `sender_name` | VARCHAR(255) | YES | - | Sender name |
+| `content` | TEXT | NO | - | Message content |
+| `attachments` | JSONB | YES | `[]` | File attachments |
+| `is_internal` | BOOLEAN | NO | `false` | Admin-only? |
+| `read_at` | TIMESTAMP | YES | - | When read |
+| `created_at` | TIMESTAMP | NO | `NOW()` | Created timestamp |
+| `updated_at` | TIMESTAMP | NO | `NOW()` | Last update |
+
+**Indexes:**
+- `idx_ticket_messages_ticket_id` on `ticket_id`
+- `idx_ticket_messages_sender_type` on `sender_type`
+- `idx_ticket_messages_created_at` on `created_at DESC`
+- `idx_ticket_messages_ticket_created` on `(ticket_id, created_at DESC)`
+- Partial: `idx_ticket_messages_is_internal` WHERE `is_internal = FALSE`
+
+**Constraints:**
+- FK to `client_tickets(id)` ON DELETE CASCADE
+
+---
+
+*For complete column definitions of the following tables, see the SQL setup script:*
 
 - `tickets` - Internal work tickets
 - `ticket_attachments` - Files on tickets

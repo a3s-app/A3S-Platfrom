@@ -347,6 +347,9 @@ ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'open';
 ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'in_progress';
 ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'resolved';
 ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'closed';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'needs_attention';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'third_party';
+ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS 'fixed';
 
 -- ticket_priority
 DO $$ BEGIN
@@ -356,6 +359,7 @@ ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'low';
 ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'medium';
 ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'high';
 ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'critical';
+ALTER TYPE ticket_priority ADD VALUE IF NOT EXISTS 'urgent';
 
 -- ticket_type
 DO $$ BEGIN
@@ -679,6 +683,73 @@ ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'active';
 ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'cancelled';
 ALTER TYPE billing_addon_status ADD VALUE IF NOT EXISTS 'pending';
 
+-- -----------------------------------------------------------------------------
+-- 1.10 MISSING ENUMS (Added for 100% DB compatibility)
+-- -----------------------------------------------------------------------------
+
+-- admin_notification_type (for admin panel notifications)
+DO $$ BEGIN
+    CREATE TYPE admin_notification_type AS ENUM ('system');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'system';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_ticket';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_remediation_request';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'new_document_request';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'client_signup';
+ALTER TYPE admin_notification_type ADD VALUE IF NOT EXISTS 'custom';
+
+-- department (for team organization)
+DO $$ BEGIN
+    CREATE TYPE department AS ENUM ('executive');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE department ADD VALUE IF NOT EXISTS 'executive';
+ALTER TYPE department ADD VALUE IF NOT EXISTS 'development';
+ALTER TYPE department ADD VALUE IF NOT EXISTS 'design';
+ALTER TYPE department ADD VALUE IF NOT EXISTS 'quality_assurance';
+ALTER TYPE department ADD VALUE IF NOT EXISTS 'project_management';
+ALTER TYPE department ADD VALUE IF NOT EXISTS 'accessibility';
+ALTER TYPE department ADD VALUE IF NOT EXISTS 'consulting';
+ALTER TYPE department ADD VALUE IF NOT EXISTS 'operations';
+
+-- member_role (for team members)
+DO $$ BEGIN
+    CREATE TYPE member_role AS ENUM ('developer');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'developer';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'ceo';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'team_lead';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'senior_developer';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'designer';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'qa_engineer';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'project_manager';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'accessibility_specialist';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'consultant';
+ALTER TYPE member_role ADD VALUE IF NOT EXISTS 'intern';
+
+-- member_status (for team members)
+DO $$ BEGIN
+    CREATE TYPE member_status AS ENUM ('active');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'inactive';
+ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'on_leave';
+ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'terminated';
+
+-- message_sender_type (for ticket messages)
+DO $$ BEGIN
+    CREATE TYPE message_sender_type AS ENUM ('admin');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE message_sender_type ADD VALUE IF NOT EXISTS 'admin';
+ALTER TYPE message_sender_type ADD VALUE IF NOT EXISTS 'client';
+
+-- team_status (for teams)
+DO $$ BEGIN
+    CREATE TYPE team_status AS ENUM ('active');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TYPE team_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE team_status ADD VALUE IF NOT EXISTS 'inactive';
+ALTER TYPE team_status ADD VALUE IF NOT EXISTS 'archived';
+
 -- ============================================================================
 -- SECTION 2: CORE TABLES (SHARED BY ADMIN & PORTAL)
 -- ============================================================================
@@ -730,6 +801,11 @@ CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status);
 CREATE INDEX IF NOT EXISTS idx_clients_type ON clients(client_type);
 CREATE INDEX IF NOT EXISTS idx_clients_type_count ON clients(client_type);
 CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email);
+CREATE INDEX IF NOT EXISTS clients_status_idx ON clients(status);
+CREATE INDEX IF NOT EXISTS clients_client_type_idx ON clients(client_type);
+CREATE INDEX IF NOT EXISTS clients_company_idx ON clients(company);
+CREATE INDEX IF NOT EXISTS clients_created_at_idx ON clients(created_at);
+CREATE INDEX IF NOT EXISTS clients_policy_status_idx ON clients(policy_status);
 
 -- -----------------------------------------------------------------------------
 -- 2.2 Projects Table
@@ -803,6 +879,12 @@ CREATE INDEX IF NOT EXISTS idx_projects_status_type_updated ON projects(status, 
 CREATE INDEX IF NOT EXISTS idx_projects_critical_sla ON projects(critical_issue_sla_days);
 CREATE INDEX IF NOT EXISTS idx_projects_high_sla ON projects(high_issue_sla_days);
 CREATE INDEX IF NOT EXISTS idx_projects_complex ON projects(status, project_type, client_id);
+CREATE INDEX IF NOT EXISTS projects_client_idx ON projects(client_id);
+CREATE INDEX IF NOT EXISTS projects_status_idx ON projects(status);
+CREATE INDEX IF NOT EXISTS projects_type_idx ON projects(project_type);
+CREATE INDEX IF NOT EXISTS projects_wcag_level_idx ON projects(wcag_level);
+CREATE INDEX IF NOT EXISTS projects_created_at_idx ON projects(created_at);
+CREATE INDEX IF NOT EXISTS projects_credentials_idx ON projects USING GIN (credentials);
 
 -- -----------------------------------------------------------------------------
 -- 2.3 Test URLs Table
@@ -834,6 +916,8 @@ CREATE TABLE IF NOT EXISTS test_urls (
 -- Test URLs indexes
 CREATE UNIQUE INDEX IF NOT EXISTS test_urls_project_url_idx ON test_urls(project_id, url);
 CREATE INDEX IF NOT EXISTS idx_test_urls_project_id ON test_urls(project_id);
+CREATE INDEX IF NOT EXISTS idx_test_urls_status ON test_urls(status);
+CREATE INDEX IF NOT EXISTS idx_test_urls_remediation_year ON test_urls(remediation_year);
 
 -- -----------------------------------------------------------------------------
 -- 2.4 Accessibility Issues Table (CRITICAL TABLE)
@@ -923,6 +1007,10 @@ CREATE INDEX IF NOT EXISTS idx_issues_complex ON accessibility_issues(project_id
 CREATE INDEX IF NOT EXISTS idx_accessibility_issues_dev_status_updated_at ON accessibility_issues(dev_status_updated_at);
 CREATE INDEX IF NOT EXISTS idx_accessibility_issues_qa_status_updated_at ON accessibility_issues(qa_status_updated_at);
 CREATE INDEX IF NOT EXISTS idx_accessibility_issues_metadata ON accessibility_issues USING GIN (metadata);
+CREATE INDEX IF NOT EXISTS idx_accessibility_issues_sheet_name ON accessibility_issues(sheet_name);
+CREATE INDEX IF NOT EXISTS idx_accessibility_issues_sheet_row ON accessibility_issues(sheet_row_number);
+CREATE UNIQUE INDEX IF NOT EXISTS unique_project_issue_id ON accessibility_issues(project_id, issue_id);
+CREATE UNIQUE INDEX IF NOT EXISTS unique_project_sheet_row ON accessibility_issues(project_id, sheet_name, sheet_row_number);
 
 -- -----------------------------------------------------------------------------
 -- 2.5 Reports Table
@@ -959,6 +1047,9 @@ CREATE INDEX IF NOT EXISTS idx_reports_sent_at ON reports(sent_at);
 CREATE INDEX IF NOT EXISTS idx_reports_project_status ON reports(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_reports_project_status_created ON reports(project_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reports_complex ON reports(project_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_reports_month_year ON reports(report_year, report_month) WHERE report_year IS NOT NULL AND report_month IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_reports_report_year ON reports(report_year) WHERE report_year IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_reports_public_token ON reports(public_token) WHERE is_public = TRUE;
 
 -- -----------------------------------------------------------------------------
 -- 2.6 Report Issues Junction Table
@@ -1063,6 +1154,7 @@ CREATE INDEX IF NOT EXISTS idx_issues_issue_logged_at ON issues(issue_logged_at)
 CREATE INDEX IF NOT EXISTS idx_issues_issue_updated_at ON issues(issue_updated_at);
 CREATE INDEX IF NOT EXISTS idx_issues_dev_status_updated_at ON issues(dev_status_updated_at);
 CREATE INDEX IF NOT EXISTS idx_issues_qa_status_updated_at ON issues(qa_status_updated_at);
+CREATE INDEX IF NOT EXISTS issues_project_idx ON issues(project_id);
 
 -- ============================================================================
 -- SECTION 3: CLIENT PORTAL TABLES
@@ -1095,6 +1187,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS idx_client_users_clerk_user_id ON client_users(clerk_user_id);
 CREATE INDEX IF NOT EXISTS idx_client_users_client_id ON client_users(client_id);
 CREATE INDEX IF NOT EXISTS idx_client_users_email ON client_users(email);
+CREATE INDEX IF NOT EXISTS idx_client_users_clerk_id ON client_users(clerk_user_id);
 
 -- -----------------------------------------------------------------------------
 -- 3.2 Client Team Members Table (Invitations)
@@ -1127,6 +1220,10 @@ CREATE INDEX IF NOT EXISTS idx_client_team_members_client_id ON client_team_memb
 CREATE INDEX IF NOT EXISTS idx_client_team_members_email ON client_team_members(email);
 CREATE INDEX IF NOT EXISTS idx_client_team_members_invitation_status ON client_team_members(invitation_status);
 CREATE INDEX IF NOT EXISTS idx_client_team_members_invitation_token ON client_team_members(invitation_token);
+CREATE INDEX IF NOT EXISTS idx_client_team_members_clerk_invitation_id ON client_team_members(clerk_invitation_id);
+CREATE INDEX IF NOT EXISTS idx_client_team_members_client_email ON client_team_members(client_id, LOWER(email));
+CREATE INDEX IF NOT EXISTS idx_client_team_members_email_lower ON client_team_members(LOWER(email));
+CREATE INDEX IF NOT EXISTS idx_client_team_members_linked_user_id ON client_team_members(linked_user_id) WHERE linked_user_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- 3.3 Project Team Members Table (User-Project Access)
@@ -1157,14 +1254,16 @@ CREATE TABLE IF NOT EXISTS client_tickets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
     project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-    created_by_user_id UUID NOT NULL REFERENCES client_users(id) ON DELETE CASCADE,
+    created_by_user_id UUID REFERENCES client_users(id) ON DELETE SET NULL,
+    created_by UUID REFERENCES client_users(id) ON DELETE SET NULL,
     title VARCHAR(500) NOT NULL,
     description TEXT NOT NULL,
-    status ticket_status NOT NULL DEFAULT 'open',
+    status ticket_status NOT NULL DEFAULT 'needs_attention',
     priority ticket_priority NOT NULL DEFAULT 'medium',
-    category ticket_category NOT NULL DEFAULT 'general',
+    category VARCHAR(50) NOT NULL DEFAULT 'technical',
     related_issue_id UUID REFERENCES accessibility_issues(id) ON DELETE SET NULL,
-    assigned_to VARCHAR(255),
+    assigned_to UUID REFERENCES client_users(id) ON DELETE SET NULL,
+    issues_id VARCHAR(255),
     internal_notes TEXT,
     resolution TEXT,
     resolved_at TIMESTAMP,
@@ -1177,6 +1276,10 @@ CREATE INDEX IF NOT EXISTS idx_client_tickets_client_id ON client_tickets(client
 CREATE INDEX IF NOT EXISTS idx_client_tickets_project_id ON client_tickets(project_id);
 CREATE INDEX IF NOT EXISTS idx_client_tickets_status ON client_tickets(status);
 CREATE INDEX IF NOT EXISTS idx_client_tickets_created_at ON client_tickets(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_client_tickets_assigned_to ON client_tickets(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_client_tickets_created_by ON client_tickets(created_by);
+CREATE INDEX IF NOT EXISTS idx_client_tickets_created_by_user_id ON client_tickets(created_by_user_id);
+CREATE INDEX IF NOT EXISTS idx_client_tickets_issues_id ON client_tickets(issues_id) WHERE issues_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- 3.5 Client Ticket Issues Junction Table
@@ -1295,6 +1398,7 @@ CREATE INDEX IF NOT EXISTS idx_document_remediations_uploaded_by ON document_rem
 CREATE INDEX IF NOT EXISTS idx_document_remediations_status ON document_remediations(status);
 CREATE INDEX IF NOT EXISTS idx_document_remediations_batch_id ON document_remediations(batch_id);
 CREATE INDEX IF NOT EXISTS idx_document_remediations_created_at ON document_remediations(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_document_remediations_reviewed_by ON document_remediations(reviewed_by_user_id);
 
 -- -----------------------------------------------------------------------------
 -- 3.9 Client Billing Add-ons Table
@@ -1355,10 +1459,82 @@ CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
 CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
 CREATE INDEX IF NOT EXISTS idx_notifications_is_archived ON notifications(is_archived);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_expires_at ON notifications(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_notifications_client_unread ON notifications(client_id, is_read, is_archived) WHERE is_read = FALSE AND is_archived = FALSE;
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read, is_archived) WHERE is_read = FALSE AND is_archived = FALSE;
+CREATE INDEX IF NOT EXISTS idx_notifications_client_unread_active ON notifications(client_id, is_read, is_archived, created_at DESC) WHERE is_archived = FALSE AND user_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread_active ON notifications(user_id, is_read, is_archived, created_at DESC) WHERE is_archived = FALSE;
 
 -- ============================================================================
 -- SECTION 4: ADMIN-ONLY TABLES
 -- ============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 4.0a Admin Notifications Table (for admin panel internal notifications)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS admin_notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    type admin_notification_type DEFAULT 'system',
+    priority VARCHAR(50) DEFAULT 'normal',
+    read BOOLEAN NOT NULL DEFAULT FALSE,
+    action_url VARCHAR(500),
+    action_label VARCHAR(255),
+    metadata JSONB DEFAULT '{}',
+    related_client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
+    related_ticket_id UUID REFERENCES client_tickets(id) ON DELETE SET NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    read_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_type ON admin_notifications(type);
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_read ON admin_notifications(read);
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_created_at ON admin_notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_related_client ON admin_notifications(related_client_id);
+
+-- -----------------------------------------------------------------------------
+-- 4.0b Clerk User ID Backups Table (for Clerk migration tracking)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS clerk_user_id_backups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_user_id UUID NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    old_clerk_user_id VARCHAR(255) NOT NULL,
+    new_clerk_user_id VARCHAR(255) NOT NULL,
+    migrated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    rolled_back_at TIMESTAMP,
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_clerk_backups_client_user_id ON clerk_user_id_backups(client_user_id);
+CREATE INDEX IF NOT EXISTS idx_clerk_backups_email ON clerk_user_id_backups(email);
+
+-- -----------------------------------------------------------------------------
+-- 4.0c Ticket Messages Table (for client ticket conversations)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS ticket_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticket_id UUID NOT NULL REFERENCES client_tickets(id) ON DELETE CASCADE,
+    sender_type message_sender_type NOT NULL,
+    sender_id UUID,
+    sender_name VARCHAR(255),
+    content TEXT NOT NULL,
+    attachments JSONB DEFAULT '[]',
+    is_internal BOOLEAN NOT NULL DEFAULT FALSE,
+    read_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_id ON ticket_messages(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_sender_type ON ticket_messages(sender_type);
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_created_at ON ticket_messages(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket_created ON ticket_messages(ticket_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_is_internal ON ticket_messages(is_internal) WHERE is_internal = FALSE;
 
 -- -----------------------------------------------------------------------------
 -- 4.1 Internal Tickets Table
@@ -1393,6 +1569,16 @@ CREATE INDEX IF NOT EXISTS idx_tickets_client ON tickets(client_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 CREATE INDEX IF NOT EXISTS idx_tickets_status_count ON tickets(status);
 CREATE INDEX IF NOT EXISTS idx_tickets_category ON tickets(ticket_category);
+CREATE INDEX IF NOT EXISTS tickets_project_idx ON tickets(project_id);
+CREATE INDEX IF NOT EXISTS tickets_client_idx ON tickets(client_id);
+CREATE INDEX IF NOT EXISTS tickets_status_idx ON tickets(status);
+CREATE INDEX IF NOT EXISTS tickets_priority_idx ON tickets(priority);
+CREATE INDEX IF NOT EXISTS tickets_type_idx ON tickets(type);
+CREATE INDEX IF NOT EXISTS tickets_assignee_idx ON tickets(assignee_id);
+CREATE INDEX IF NOT EXISTS tickets_reporter_idx ON tickets(reporter_id);
+CREATE INDEX IF NOT EXISTS tickets_category_idx ON tickets(ticket_category);
+CREATE INDEX IF NOT EXISTS tickets_due_date_idx ON tickets(due_date);
+CREATE INDEX IF NOT EXISTS tickets_created_at_idx ON tickets(created_at);
 
 -- -----------------------------------------------------------------------------
 -- 4.2 Ticket Attachments Table
@@ -1411,6 +1597,8 @@ CREATE TABLE IF NOT EXISTS ticket_attachments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ticket_attachments_ticket_id ON ticket_attachments(ticket_id);
+CREATE INDEX IF NOT EXISTS ticket_attachments_ticket_idx ON ticket_attachments(ticket_id);
+CREATE INDEX IF NOT EXISTS ticket_attachments_uploaded_at_idx ON ticket_attachments(uploaded_at);
 
 -- -----------------------------------------------------------------------------
 -- 4.3 Ticket Comments Table
@@ -1428,6 +1616,9 @@ CREATE TABLE IF NOT EXISTS ticket_comments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ticket_comments_ticket_id ON ticket_comments(ticket_id);
+CREATE INDEX IF NOT EXISTS ticket_comments_ticket_idx ON ticket_comments(ticket_id);
+CREATE INDEX IF NOT EXISTS ticket_comments_user_idx ON ticket_comments(user_id);
+CREATE INDEX IF NOT EXISTS ticket_comments_created_at_idx ON ticket_comments(created_at);
 
 -- -----------------------------------------------------------------------------
 -- 4.4 Teams Table
@@ -1528,6 +1719,11 @@ CREATE TABLE IF NOT EXISTS project_staging_credentials (
 
 CREATE INDEX IF NOT EXISTS idx_project_staging_credentials_project_id ON project_staging_credentials(project_id);
 CREATE INDEX IF NOT EXISTS project_staging_credentials_credentials_idx ON project_staging_credentials USING GIN (credentials);
+CREATE INDEX IF NOT EXISTS project_staging_credentials_project_idx ON project_staging_credentials(project_id);
+CREATE INDEX IF NOT EXISTS project_staging_credentials_type_idx ON project_staging_credentials(type);
+CREATE INDEX IF NOT EXISTS project_staging_credentials_environment_idx ON project_staging_credentials(environment);
+CREATE INDEX IF NOT EXISTS project_staging_credentials_active_idx ON project_staging_credentials(is_active);
+CREATE UNIQUE INDEX IF NOT EXISTS project_staging_credentials_project_type_env_idx ON project_staging_credentials(project_id, type, environment);
 
 -- -----------------------------------------------------------------------------
 -- 4.8 Client Credentials Table
@@ -1547,6 +1743,8 @@ CREATE TABLE IF NOT EXISTS client_credentials (
 );
 
 CREATE INDEX IF NOT EXISTS idx_client_credentials_client_id ON client_credentials(client_id);
+CREATE INDEX IF NOT EXISTS client_credentials_client_idx ON client_credentials(client_id);
+CREATE INDEX IF NOT EXISTS client_credentials_type_idx ON client_credentials(type);
 
 -- -----------------------------------------------------------------------------
 -- 4.9 Client Files Table
@@ -1569,6 +1767,10 @@ CREATE TABLE IF NOT EXISTS client_files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_client_files_client_id ON client_files(client_id);
+CREATE INDEX IF NOT EXISTS client_files_client_idx ON client_files(client_id);
+CREATE INDEX IF NOT EXISTS client_files_category_idx ON client_files(category);
+CREATE INDEX IF NOT EXISTS client_files_uploaded_at_idx ON client_files(uploaded_at);
+CREATE INDEX IF NOT EXISTS client_files_access_level_idx ON client_files(access_level);
 
 -- -----------------------------------------------------------------------------
 -- 4.10 Project Documents Table
@@ -1590,6 +1792,10 @@ CREATE TABLE IF NOT EXISTS project_documents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_documents_project_id ON project_documents(project_id);
+CREATE INDEX IF NOT EXISTS project_documents_project_idx ON project_documents(project_id);
+CREATE INDEX IF NOT EXISTS project_documents_type_idx ON project_documents(type);
+CREATE INDEX IF NOT EXISTS project_documents_uploaded_at_idx ON project_documents(uploaded_at);
+CREATE INDEX IF NOT EXISTS project_documents_latest_idx ON project_documents(is_latest);
 
 -- -----------------------------------------------------------------------------
 -- 4.11 Project Activities Table
@@ -1609,6 +1815,10 @@ CREATE TABLE IF NOT EXISTS project_activities (
 CREATE INDEX IF NOT EXISTS idx_activities_project_id ON project_activities(project_id);
 CREATE INDEX IF NOT EXISTS idx_activities_timestamp ON project_activities(timestamp);
 CREATE INDEX IF NOT EXISTS idx_activities_recent_timestamp ON project_activities(timestamp DESC);
+CREATE INDEX IF NOT EXISTS project_activities_project_idx ON project_activities(project_id);
+CREATE INDEX IF NOT EXISTS project_activities_user_idx ON project_activities(user_id);
+CREATE INDEX IF NOT EXISTS project_activities_action_idx ON project_activities(action);
+CREATE INDEX IF NOT EXISTS project_activities_timestamp_idx ON project_activities(timestamp);
 
 -- -----------------------------------------------------------------------------
 -- 4.12 Project Developers Table
@@ -1628,6 +1838,11 @@ CREATE TABLE IF NOT EXISTS project_developers (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_developers_project_id ON project_developers(project_id);
+CREATE INDEX IF NOT EXISTS project_developers_project_idx ON project_developers(project_id);
+CREATE INDEX IF NOT EXISTS project_developers_developer_idx ON project_developers(developer_id);
+CREATE INDEX IF NOT EXISTS project_developers_role_idx ON project_developers(role);
+CREATE INDEX IF NOT EXISTS project_developers_active_idx ON project_developers(is_active);
+CREATE UNIQUE INDEX IF NOT EXISTS project_developers_project_developer_idx ON project_developers(project_id, developer_id);
 
 -- -----------------------------------------------------------------------------
 -- 4.13 Project Milestones Table
@@ -1651,6 +1866,10 @@ CREATE TABLE IF NOT EXISTS project_milestones (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_milestones_project_id ON project_milestones(project_id);
+CREATE INDEX IF NOT EXISTS project_milestones_project_idx ON project_milestones(project_id);
+CREATE INDEX IF NOT EXISTS project_milestones_status_idx ON project_milestones(status);
+CREATE INDEX IF NOT EXISTS project_milestones_due_date_idx ON project_milestones(due_date);
+CREATE INDEX IF NOT EXISTS project_milestones_order_idx ON project_milestones("order");
 
 -- -----------------------------------------------------------------------------
 -- 4.14 Project Time Entries Table
@@ -1672,6 +1891,12 @@ CREATE TABLE IF NOT EXISTS project_time_entries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_time_entries_project_id ON project_time_entries(project_id);
+CREATE INDEX IF NOT EXISTS project_time_entries_project_idx ON project_time_entries(project_id);
+CREATE INDEX IF NOT EXISTS project_time_entries_developer_idx ON project_time_entries(developer_id);
+CREATE INDEX IF NOT EXISTS project_time_entries_date_idx ON project_time_entries(date);
+CREATE INDEX IF NOT EXISTS project_time_entries_category_idx ON project_time_entries(category);
+CREATE INDEX IF NOT EXISTS project_time_entries_billable_idx ON project_time_entries(billable);
+CREATE INDEX IF NOT EXISTS project_time_entries_approved_idx ON project_time_entries(approved);
 
 -- -----------------------------------------------------------------------------
 -- 4.15 Sync Logs Table
@@ -1767,6 +1992,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_checkpoint_sync_project_id ON checkpoint_sync(project_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_sync_created_at ON checkpoint_sync(created_at DESC);
+CREATE INDEX IF NOT EXISTS checkpoint_sync_project_idx ON checkpoint_sync(project_id);
 
 -- -----------------------------------------------------------------------------
 -- 4.18 Status Table
@@ -1802,6 +2028,7 @@ CREATE INDEX IF NOT EXISTS idx_status_url ON status(url);
 CREATE INDEX IF NOT EXISTS idx_status_status ON status(status);
 CREATE INDEX IF NOT EXISTS idx_status_created_at ON status(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_status_project_url ON status(project_id, url);
+CREATE INDEX IF NOT EXISTS status_project_idx ON status(project_id);
 
 -- -----------------------------------------------------------------------------
 -- 4.19 Status Check Table
@@ -1828,6 +2055,7 @@ CREATE INDEX IF NOT EXISTS idx_status_check_url ON status_check(url);
 CREATE INDEX IF NOT EXISTS idx_status_check_status ON status_check(status);
 CREATE INDEX IF NOT EXISTS idx_status_check_created_at ON status_check(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_status_check_project_url ON status_check(project_id, url);
+CREATE INDEX IF NOT EXISTS status_check_project_idx ON status_check(project_id);
 
 -- -----------------------------------------------------------------------------
 -- 4.20 Issue Comments Table
@@ -1922,6 +2150,7 @@ CREATE INDEX IF NOT EXISTS idx_wcag_url_check_project_id ON wcag_url_check(proje
 CREATE INDEX IF NOT EXISTS idx_wcag_url_check_test_scenario ON wcag_url_check(test_scenario);
 CREATE INDEX IF NOT EXISTS idx_wcag_url_check_created_at ON wcag_url_check(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_wcag_url_check_project_scenario ON wcag_url_check(project_id, test_scenario);
+CREATE UNIQUE INDEX IF NOT EXISTS unique_project_test_scenario ON wcag_url_check(project_id, test_scenario);
 
 -- ============================================================================
 -- SECTION 5: TRIGGERS FOR AUTO-UPDATING updated_at
